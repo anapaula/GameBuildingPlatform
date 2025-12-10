@@ -9,14 +9,29 @@ class LLMService:
     def __init__(self, db: Session):
         self.db = db
     
-    def get_llm_config(self, config_id: Optional[int] = None) -> Optional[LLMConfiguration]:
+    def get_llm_config(self, config_id: Optional[int] = None, session_llm_provider: Optional[str] = None, session_llm_model: Optional[str] = None) -> Optional[LLMConfiguration]:
         if config_id:
-            return self.db.query(LLMConfiguration).filter(LLMConfiguration.id == config_id, LLMConfiguration.is_active == True).first()
-        else:
-            return self.db.query(LLMConfiguration).filter(LLMConfiguration.is_active == True).first()
+            # Quando config_id é fornecido, buscar diretamente por ID (não precisa estar ativa)
+            return self.db.query(LLMConfiguration).filter(LLMConfiguration.id == config_id).first()
+        elif session_llm_provider and session_llm_model:
+            # Tentar encontrar a LLM específica da sessão
+            try:
+                # Converter string para enum se necessário
+                provider_enum = LLMProvider(session_llm_provider) if isinstance(session_llm_provider, str) else session_llm_provider
+                config = self.db.query(LLMConfiguration).filter(
+                    LLMConfiguration.provider == provider_enum,
+                    LLMConfiguration.model_name == session_llm_model
+                ).first()
+                if config:
+                    return config
+            except (ValueError, AttributeError):
+                # Se não conseguir converter, tenta buscar por string
+                pass
+        # Fallback para LLM ativa
+        return self.db.query(LLMConfiguration).filter(LLMConfiguration.is_active == True).first()
     
-    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, config_id: Optional[int] = None, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        config = self.get_llm_config(config_id)
+    async def generate_response(self, prompt: str, system_prompt: Optional[str] = None, config_id: Optional[int] = None, context: Optional[Dict[str, Any]] = None, session_llm_provider: Optional[str] = None, session_llm_model: Optional[str] = None) -> Dict[str, Any]:
+        config = self.get_llm_config(config_id, session_llm_provider, session_llm_model)
         if not config:
             raise ValueError("Nenhuma configuração de LLM ativa encontrada")
         start_time = time.time()
@@ -43,15 +58,28 @@ class LLMService:
             raise Exception(f"Erro ao gerar resposta: {str(e)}")
     
     async def _call_openai(self, prompt: str, system_prompt: Optional[str], config: LLMConfiguration, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        client = openai.OpenAI(api_key=config.api_key)
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        if context:
-            messages.append({"role": "system", "content": f"Contexto: {context}"})
-        messages.append({"role": "user", "content": prompt})
-        response = client.chat.completions.create(model=config.model_name, messages=messages, temperature=config.temperature, max_tokens=config.max_tokens)
-        return {"text": response.choices[0].message.content, "tokens_used": response.usage.total_tokens}
+        try:
+            client = openai.OpenAI(api_key=config.api_key)
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            if context:
+                messages.append({"role": "system", "content": f"Contexto: {context}"})
+            messages.append({"role": "user", "content": prompt})
+            
+            # Preparar parâmetros
+            params = {
+                "model": config.model_name,
+                "messages": messages,
+                "temperature": config.temperature or 0.7
+            }
+            if config.max_tokens:
+                params["max_tokens"] = config.max_tokens
+            
+            response = client.chat.completions.create(**params)
+            return {"text": response.choices[0].message.content, "tokens_used": response.usage.total_tokens}
+        except Exception as e:
+            raise Exception(f"Erro ao chamar OpenAI: {str(e)}")
     
     async def _call_anthropic(self, prompt: str, system_prompt: Optional[str], config: LLMConfiguration, context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         client = Anthropic(api_key=config.api_key)

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from database import get_db
 from models import User, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult
-from schemas import GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
+from schemas import GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
 from auth import get_current_admin_user
 from services.llm_service import LLMService
 
@@ -77,22 +77,86 @@ async def list_llm_configs(db: Session = Depends(get_db), current_user: User = D
     configs = db.query(LLMConfiguration).all()
     return configs
 
+@router.get("/llm/configs/{config_id}", response_model=LLMConfigResponse)
+async def get_llm_config(config_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
+    config = db.query(LLMConfiguration).filter(LLMConfiguration.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração de LLM não encontrada")
+    return config
+
+@router.put("/llm/configs/{config_id}", response_model=LLMConfigResponse)
+async def update_llm_config(config_id: int, config_data: LLMConfigUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
+    config = db.query(LLMConfiguration).filter(LLMConfiguration.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração de LLM não encontrada")
+    
+    # Atualizar apenas os campos fornecidos
+    if config_data.provider is not None:
+        config.provider = config_data.provider
+    if config_data.model_name is not None:
+        config.model_name = config_data.model_name
+    if config_data.api_key is not None:
+        config.api_key = config_data.api_key
+    if config_data.cost_per_token is not None:
+        config.cost_per_token = config_data.cost_per_token
+    if config_data.max_tokens is not None:
+        config.max_tokens = config_data.max_tokens
+    if config_data.temperature is not None:
+        config.temperature = config_data.temperature
+    
+    db.commit()
+    db.refresh(config)
+    return config
+
+@router.delete("/llm/configs/{config_id}")
+async def delete_llm_config(config_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
+    config = db.query(LLMConfiguration).filter(LLMConfiguration.id == config_id).first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Configuração de LLM não encontrada")
+    
+    # Não permitir deletar se for a única configuração ativa
+    if config.is_active:
+        other_configs = db.query(LLMConfiguration).filter(LLMConfiguration.id != config_id).count()
+        if other_configs == 0:
+            raise HTTPException(status_code=400, detail="Não é possível deletar a única configuração de LLM")
+    
+    db.delete(config)
+    db.commit()
+    return {"message": "Configuração de LLM deletada com sucesso"}
+
 @router.post("/llm/test", response_model=LLMTestResponse)
 async def test_llm(test_data: LLMTestRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     config = db.query(LLMConfiguration).filter(LLMConfiguration.id == test_data.llm_config_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuração de LLM não encontrada")
+    
     llm_service = LLMService(db)
     try:
-        response = await llm_service.generate_response(prompt=test_data.test_prompt, system_prompt="Você é um assistente útil. Responda em português do Brasil.", config_id=config.id)
+        # Usar config_id explicitamente para garantir que usa a configuração correta
+        response = await llm_service.generate_response(
+            prompt=test_data.test_prompt, 
+            system_prompt="Você é um assistente útil. Responda em português do Brasil.", 
+            config_id=config.id
+        )
         quality_score = 10.0 - min(response["response_time"] * 2, 5.0)
-        test_result = LLMTestResult(llm_config_id=config.id, test_prompt=test_data.test_prompt, response=response["response"], response_time=response["response_time"], tokens_used=response["tokens_used"], cost=response["cost"], quality_score=quality_score)
+        test_result = LLMTestResult(
+            llm_config_id=config.id, 
+            test_prompt=test_data.test_prompt, 
+            response=response["response"], 
+            response_time=response["response_time"], 
+            tokens_used=response["tokens_used"], 
+            cost=response["cost"], 
+            quality_score=quality_score
+        )
         db.add(test_result)
         db.commit()
         db.refresh(test_result)
         return test_result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao testar LLM: {str(e)}")
+        import traceback
+        error_detail = str(e)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao testar LLM: {error_detail}")
 
 @router.get("/llm/stats", response_model=List[LLMStats])
 async def get_llm_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):

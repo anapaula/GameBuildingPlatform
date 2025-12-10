@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import { LLMConfiguration } from '@/types'
-import { Plus, CheckCircle, XCircle, Play } from 'lucide-react'
+import { Plus, CheckCircle, XCircle, Play, Edit, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function LLMsPage() {
   const [configs, setConfigs] = useState<LLMConfiguration[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [editingConfig, setEditingConfig] = useState<LLMConfiguration | null>(null)
 
   useEffect(() => {
     fetchConfigs()
@@ -28,23 +29,47 @@ export default function LLMsPage() {
 
   const handleActivate = async (id: number) => {
     try {
+      toast.loading('Ativando LLM...', { id: 'activate-llm' })
       await api.patch(`/api/llm/${id}/activate`)
-      toast.success('LLM ativado')
+      toast.success('LLM definida como ativa para o jogo!', { id: 'activate-llm' })
       fetchConfigs()
-    } catch (error) {
-      toast.error('Erro ao ativar LLM')
+    } catch (error: any) {
+      console.error('Erro ao ativar LLM:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao ativar LLM', { id: 'activate-llm' })
     }
   }
 
   const handleTest = async (id: number) => {
     try {
+      toast.loading('Testando LLM...', { id: 'test-llm' })
       const res = await api.post('/api/admin/llm/test', {
         llm_config_id: id,
         test_prompt: 'Olá, você está funcionando? Responda em português.',
       })
-      toast.success(`Teste realizado! Score: ${res.data.quality_score?.toFixed(2)}`)
+      toast.success(`Teste realizado! Score: ${res.data.quality_score?.toFixed(2)}`, { id: 'test-llm' })
+      fetchConfigs() // Atualizar estatísticas
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Erro ao testar LLM')
+      console.error('Erro ao testar LLM:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao testar LLM', { id: 'test-llm' })
+    }
+  }
+
+  const handleEdit = (config: LLMConfiguration) => {
+    console.log('Editando configuração:', config)
+    setEditingConfig(config)
+    setShowModal(true)
+  }
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('Tem certeza que deseja deletar esta configuração de LLM?')) {
+      return
+    }
+    try {
+      await api.delete(`/api/admin/llm/configs/${id}`)
+      toast.success('Configuração deletada com sucesso')
+      fetchConfigs()
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Erro ao deletar configuração')
     }
   }
 
@@ -72,11 +97,19 @@ export default function LLMsPage() {
           </div>
         ) : (
           configs.map((config) => (
-            <div key={config.id} className="bg-white shadow rounded-lg p-6">
+            <div key={config.id} className={`bg-white shadow rounded-lg p-6 ${config.is_active ? 'ring-2 ring-green-500' : ''}`}>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-gray-900">
-                  {config.provider} - {config.model_name}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-medium text-gray-900">
+                    {config.provider} - {config.model_name}
+                  </h3>
+                  {config.is_active && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Ativa
+                    </span>
+                  )}
+                </div>
                 {config.is_active ? (
                   <CheckCircle className="h-5 w-5 text-green-500" />
                 ) : (
@@ -89,22 +122,52 @@ export default function LLMsPage() {
                 <p>Custo: R$ {config.total_cost.toFixed(4)}</p>
                 <p>Tempo médio: {config.avg_response_time.toFixed(2)}s</p>
               </div>
-              <div className="mt-4 flex gap-2">
-                {!config.is_active && (
+              <div className="mt-4 space-y-2">
+                <div className="flex gap-2">
                   <button
                     onClick={() => handleActivate(config.id)}
-                    className="flex-1 bg-green-600 text-white px-3 py-2 rounded text-sm hover:bg-green-700"
+                    className={`flex-1 px-3 py-2 rounded text-sm font-medium flex items-center justify-center gap-1 ${
+                      config.is_active
+                        ? 'bg-green-600 text-white hover:bg-green-700'
+                        : 'bg-green-500 text-white hover:bg-green-600'
+                    }`}
+                    title={config.is_active ? 'Esta LLM já está ativa' : 'Definir como LLM ativa para o jogo'}
                   >
-                    Ativar
+                    <CheckCircle className="h-4 w-4" />
+                    {config.is_active ? 'Ativa' : 'Definir como Ativa'}
                   </button>
-                )}
-                <button
-                  onClick={() => handleTest(config.id)}
-                  className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 flex items-center justify-center gap-1"
-                >
-                  <Play className="h-4 w-4" />
-                  Testar
-                </button>
+                  <button
+                    onClick={() => handleTest(config.id)}
+                    className="flex-1 bg-blue-600 text-white px-3 py-2 rounded text-sm hover:bg-blue-700 flex items-center justify-center gap-1"
+                  >
+                    <Play className="h-4 w-4" />
+                    Testar
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      console.log('Botão Editar clicado para config:', config.id)
+                      handleEdit(config)
+                    }}
+                    className="flex-1 bg-yellow-600 text-white px-3 py-2 rounded text-sm hover:bg-yellow-700 flex items-center justify-center gap-1"
+                    title="Editar configuração"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => {
+                      console.log('Botão Deletar clicado para config:', config.id)
+                      handleDelete(config.id)
+                    }}
+                    className="flex-1 bg-red-600 text-white px-3 py-2 rounded text-sm hover:bg-red-700 flex items-center justify-center gap-1"
+                    title="Deletar configuração"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Deletar
+                  </button>
+                </div>
               </div>
             </div>
           ))
@@ -113,9 +176,14 @@ export default function LLMsPage() {
 
       {showModal && (
         <LLMConfigModal
-          onClose={() => setShowModal(false)}
+          config={editingConfig}
+          onClose={() => {
+            setShowModal(false)
+            setEditingConfig(null)
+          }}
           onSuccess={() => {
             setShowModal(false)
+            setEditingConfig(null)
             fetchConfigs()
           }}
         />
@@ -125,41 +193,97 @@ export default function LLMsPage() {
 }
 
 function LLMConfigModal({
+  config,
   onClose,
   onSuccess,
 }: {
+  config?: LLMConfiguration | null
   onClose: () => void
   onSuccess: () => void
 }) {
+  const isEditing = !!config
   const [formData, setFormData] = useState({
-    provider: 'openai' as 'openai' | 'anthropic',
-    model_name: '',
-    api_key: '',
-    cost_per_token: '',
-    max_tokens: '',
-    temperature: '0.7',
+    provider: (config?.provider || 'openai') as 'openai' | 'anthropic',
+    model_name: config?.model_name || '',
+    api_key: '', // Sempre vazio por segurança
+    cost_per_token: config?.cost_per_token?.toString() || '',
+    max_tokens: config?.max_tokens?.toString() || '',
+    temperature: config?.temperature?.toString() || '0.7',
   })
+
+  // Atualizar formData quando config mudar
+  useEffect(() => {
+    if (config) {
+      setFormData({
+        provider: (config.provider || 'openai') as 'openai' | 'anthropic',
+        model_name: config.model_name || '',
+        api_key: '', // Sempre vazio por segurança
+        cost_per_token: config.cost_per_token?.toString() || '',
+        max_tokens: config.max_tokens?.toString() || '',
+        temperature: config.temperature?.toString() || '0.7',
+      })
+    } else {
+      setFormData({
+        provider: 'openai' as 'openai' | 'anthropic',
+        model_name: '',
+        api_key: '',
+        cost_per_token: '',
+        max_tokens: '',
+        temperature: '0.7',
+      })
+    }
+  }, [config])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.post('/api/admin/llm/configs', {
-        ...formData,
-        cost_per_token: formData.cost_per_token ? parseFloat(formData.cost_per_token) : null,
-        max_tokens: formData.max_tokens ? parseInt(formData.max_tokens) : null,
-        temperature: parseFloat(formData.temperature),
-      })
-      toast.success('Configuração criada')
+      if (isEditing && config) {
+        // Atualizar - só envia campos que foram alterados
+        const updateData: any = {}
+        if (formData.provider !== config.provider) updateData.provider = formData.provider
+        if (formData.model_name !== config.model_name) updateData.model_name = formData.model_name
+        if (formData.api_key) updateData.api_key = formData.api_key
+        if (formData.cost_per_token !== (config.cost_per_token?.toString() || '')) {
+          updateData.cost_per_token = formData.cost_per_token ? parseFloat(formData.cost_per_token) : null
+        }
+        if (formData.max_tokens !== (config.max_tokens?.toString() || '')) {
+          updateData.max_tokens = formData.max_tokens ? parseInt(formData.max_tokens) : null
+        }
+        if (formData.temperature !== config.temperature.toString()) {
+          updateData.temperature = parseFloat(formData.temperature)
+        }
+        
+        toast.loading('Atualizando configuração...', { id: 'save-llm' })
+        await api.put(`/api/admin/llm/configs/${config.id}`, updateData)
+        toast.success('Configuração atualizada com sucesso!', { id: 'save-llm' })
+      } else {
+        // Criar - validação
+        if (!formData.api_key) {
+          toast.error('API Key é obrigatória para criar uma nova configuração')
+          return
+        }
+        toast.loading('Criando configuração...', { id: 'save-llm' })
+        await api.post('/api/admin/llm/configs', {
+          ...formData,
+          cost_per_token: formData.cost_per_token ? parseFloat(formData.cost_per_token) : null,
+          max_tokens: formData.max_tokens ? parseInt(formData.max_tokens) : null,
+          temperature: parseFloat(formData.temperature),
+        })
+        toast.success('Configuração criada com sucesso!', { id: 'save-llm' })
+      }
       onSuccess()
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Erro ao criar configuração')
+      console.error('Erro ao salvar configuração:', error)
+      toast.error(error.response?.data?.detail || `Erro ao ${isEditing ? 'atualizar' : 'criar'} configuração`, { id: 'save-llm' })
     }
   }
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
       <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Nova Configuração de LLM</h3>
+        <h3 className="text-lg font-bold text-gray-900 mb-4">
+          {isEditing ? 'Editar Configuração de LLM' : 'Nova Configuração de LLM'}
+        </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">Provider</label>
@@ -190,8 +314,12 @@ function LLMConfigModal({
               value={formData.api_key}
               onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-              required
+              placeholder={isEditing ? "Deixe em branco para manter a atual" : ""}
+              required={!isEditing}
             />
+            {isEditing && (
+              <p className="mt-1 text-xs text-gray-500">Deixe em branco para manter a API key atual</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Custo por Token</label>
@@ -229,7 +357,7 @@ function LLMConfigModal({
               type="submit"
               className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
             >
-              Criar
+              {isEditing ? 'Atualizar' : 'Criar'}
             </button>
             <button
               type="button"

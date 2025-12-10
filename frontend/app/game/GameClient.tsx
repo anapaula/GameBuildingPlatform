@@ -93,6 +93,7 @@ function GameClient() {
   const [selectedScenario, setSelectedScenario] = useState<number | null>(null)
   const [testMode, setTestMode] = useState(false)
   const [loadingConfigs, setLoadingConfigs] = useState(false)
+  const [showLlmChangeModal, setShowLlmChangeModal] = useState(false)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -415,6 +416,21 @@ function GameClient() {
     setSession(null)
     setInteractions([])
     loadSessionSelection()
+  }
+
+  const changeSessionLLM = async (llmConfigId: number) => {
+    if (!session) return
+
+    try {
+      await api.patch(`/api/sessions/${session.id}/llm?llm_config_id=${llmConfigId}`)
+      const updatedSession = await api.get(`/api/sessions/${session.id}`)
+      setSession(updatedSession.data)
+      setShowLlmChangeModal(false)
+      toast.success('LLM alterada com sucesso!')
+    } catch (error: any) {
+      console.error('Erro ao trocar LLM:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao trocar LLM')
+    }
   }
 
   const handleLogout = () => {

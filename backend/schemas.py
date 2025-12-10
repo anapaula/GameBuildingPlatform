@@ -136,6 +136,14 @@ class LLMConfigCreate(BaseModel):
     max_tokens: Optional[int] = None
     temperature: float = 0.7
 
+class LLMConfigUpdate(BaseModel):
+    provider: Optional[LLMProvider] = None
+    model_name: Optional[str] = None
+    api_key: Optional[str] = None
+    cost_per_token: Optional[float] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+
 class LLMConfigResponse(BaseModel):
     id: int
     provider: LLMProvider

@@ -60,3 +60,23 @@ async def resume_session(session_id: int, db: Session = Depends(get_db), current
     session.last_activity = datetime.utcnow()
     db.commit()
     return {"message": "Sessão retomada com sucesso"}
+
+@router.patch("/{session_id}/llm")
+async def change_session_llm(session_id: int, llm_config_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    from models import LLMConfiguration
+    session = db.query(GameSession).filter(GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    if current_user.role.value != "admin" and session.player_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    
+    llm_config = db.query(LLMConfiguration).filter(LLMConfiguration.id == llm_config_id).first()
+    if not llm_config:
+        raise HTTPException(status_code=404, detail="Configuração de LLM não encontrada")
+    
+    session.llm_provider = llm_config.provider.value
+    session.llm_model = llm_config.model_name
+    session.last_activity = datetime.utcnow()
+    db.commit()
+    db.refresh(session)
+    return {"message": "LLM da sessão alterada com sucesso", "llm_provider": session.llm_provider, "llm_model": session.llm_model}

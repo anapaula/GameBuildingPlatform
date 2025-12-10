@@ -4,13 +4,25 @@ from typing import List
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import GameSession, SessionInteraction, User, GameRule, Scenario
-from schemas import InteractionCreate, InteractionResponse
+from models import GameSession, SessionInteraction, User, GameRule, Scenario, LLMConfiguration
+from schemas import InteractionCreate, InteractionResponse, LLMConfigResponse
 from auth import get_current_active_user
 from services.llm_service import LLMService
 from services.audio_service import AudioService
 
 router = APIRouter()
+
+@router.get("/config/llms", response_model=List[LLMConfigResponse])
+async def get_available_llms(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    """Retorna todas as configurações de LLM disponíveis para uso no jogo"""
+    configs = db.query(LLMConfiguration).all()
+    return configs
+
+@router.get("/config/scenarios")
+async def get_available_scenarios(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    """Retorna todos os cenários disponíveis"""
+    scenarios = db.query(Scenario).filter(Scenario.is_active == True).order_by(Scenario.order).all()
+    return scenarios
 
 @router.post("/interact", response_model=InteractionResponse)
 async def interact_with_game(interaction_data: InteractionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
@@ -30,7 +42,14 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
         rules_text = "\n".join([f"- {rule.title}: {rule.description}" for rule in game_rules])
         system_prompt += f"\n\nRegras do jogo:\n{rules_text}"
     try:
-        llm_response = await llm_service.generate_response(prompt=interaction_data.player_input, system_prompt=system_prompt, config_id=None, context=context)
+        llm_response = await llm_service.generate_response(
+            prompt=interaction_data.player_input, 
+            system_prompt=system_prompt, 
+            config_id=None, 
+            context=context,
+            session_llm_provider=session.llm_provider,
+            session_llm_model=session.llm_model
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao gerar resposta: {str(e)}")
     audio_url = None
