@@ -1,0 +1,250 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function POST(req: NextRequest) {
+  const { question } = await req.json();
+
+  /////////////////////////// BBC /////////////////////////////////////////
+
+  // 1. Buscar notícias recentes da BBC (exemplo usando RSS)
+  const rssUrl = 'https://feeds.bbci.co.uk/portuguese/rss.xml';
+  const rssRes = await fetch(rssUrl);
+  const rssText = await rssRes.text();
+
+  // 2. Extrair títulos e descrições das notícias (parsing simples)
+  const items = Array.from(rssText.matchAll(/<item>([\s\S]*?)<\/item>/g)).map(match => {
+    const title = match[1].match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+    const description = match[1].match(/<description>([\s\S]*?)<\/description>/)?.[1] || '';
+    const link = match[1].match(/<link>([\s\S]*?)<\/link>/)?.[1] || '';
+    return { title, description, link };
+  });
+
+   // 3. Montar contexto com as 3 notícias mais recentes
+  const bbccontext = items.slice(0, 3).map(item =>
+    `Título: ${item.title}\nDescrição: ${item.description}\nLink: ${item.link}`
+  ).join('\n\n');
+
+  ////////////////////////////////////////////////////////////////////////////////
+
+  /////////////////////////// Cafe Astrology /////////////////////////////////////////
+  ///////////////////// Horoscopo do dia com todos os signos ////////////////////////////q
+  const signosMap = {
+  aries: ['aries', 'áries'],
+  taurus: ['touro','taurus'],
+  gemini: ['gemeos', 'gêmeos','gemini'],
+  cancer: ['cancer', 'câncer'],
+  leo: ['leao', 'leão','leo'],
+  virgo: ['virgem','virgo'],
+  libra: ['libra'],
+  scorpio: ['escorpiao', 'escorpião','scorpio'],
+  sagittarius: ['sagitario', 'sagitário','sagittarius'],
+  capricorn: ['capricornio', 'capricórnio','capricorn'],
+  aquarius: ['aquario', 'aquário','aquarius'],
+  pisces: ['peixes','pisces'],
+};
+
+function detectarSignos(pergunta: string): string[] {
+  const encontrados: string[] = [];
+  const perguntaLower = pergunta.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  for (const [signo, variantes] of Object.entries(signosMap)) {
+    for (const variante of variantes) {
+      const varianteNorm = variante.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      if (perguntaLower.includes(varianteNorm)) {
+        encontrados.push(signo);
+        break;
+      }
+    }
+  }
+  return encontrados;
+}
+
+const signosEncontrados = detectarSignos(question);
+const horoscopos: { signo: string, texto: string, link: string }[] = [];
+
+for (const signo of signosEncontrados) {
+  const url = `https://cafeastrology.com/${signo}dailyhoroscope.html`;
+  try {
+    const res = await fetch(url);
+    const html = await res.text();
+    const match = html.match(/<p class="Text__Paragraph.*?">(.*?)<\/p>/);
+    const texto = match ? match[1].replace(/<[^>]+>/g, '').trim() : '';
+    if (texto) {
+      horoscopos.push({ signo, texto, link: url });
+    }
+  } catch (e) {
+    // Ignora erros individuais
+  }
+}
+
+const horoscopoContext = horoscopos.length > 0
+  ? horoscopos.map(h =>
+      `Signo: ${h.signo.charAt(0).toUpperCase() + h.signo.slice(1)}\nHoróscopo do dia: ${h.texto}\nLink: ${h.link}`
+    ).join('\n\n')
+  : 'Nenhum signo relevante encontrado na pergunta do usuário.';
+
+/////////////
+
+
+  
+//   const signos = [
+//   'aries', 'touro', 'gemeos', 'cancer', 'leao', 'virgem',
+//   'libra', 'escorpiao', 'sagitario', 'capricornio', 'aquario', 'peixes'
+// ];
+
+// const signosen = [
+//   'aries', 'taurus', 'gemini', 'cancer', 'leo', 'virgo',
+//   'libra', 'scorpio', 'sagittarius', 'capricorn', 'aquarius', 'pisces'
+// ];
+
+// const horoscopos: { signo: string, texto: string, link: string }[] = [];
+
+// for (const signo of signosen) {
+//   const url = `https://cafeastrology.com/${signo}dailyhoroscope/`;
+// //   try {
+// //     const res = await fetch(url);
+// //     const html = await res.text();
+// //     // Regex para capturar o texto do horóscopo do dia
+// //     const match = html.match(/<p class="Text__Paragraph.*?">(.*?)<\/p>/);
+// //     const texto = match ? match[1].replace(/<[^>]+>/g, '').trim() : '';
+// //     if (texto) {
+// //       horoscopos.push({ signo, texto, link: url });
+// //     }
+// //   } catch (e) {
+// //     // Se der erro em algum signo, apenas ignora
+// //   }
+//     try {
+//        const res = await fetch(url);
+//        const html = await res.text();
+//        //2. Regex para capturar títulos e resumos dos artigos de horoscopo do dia
+//         const articleRegex = /<a[^>]+class="ArticleListItem__Link[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+//         const horoscopos = [];
+//         let match;
+//         while ((match = articleRegex.exec(html)) !== null && horoscopos.length < 3) {
+//             const titleMatch = match[1].match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
+//             const descMatch = match[1].match(/<p[^>]*>([\s\S]*?)<\/p>/);
+//             const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+//             const texto = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+//             horoscopos.push({ title, texto, link: url });
+//         }
+//     } catch (e) {
+//      // Se der erro em algum signo, apenas ignora
+//    }
+// }
+
+// // Montar contexto dos horóscopos
+// const horoscopoContext = horoscopos.map(h =>
+//   `Signo: ${h.signo.charAt(0).toUpperCase() + h.signo.slice(1)}\nHoróscopo do dia: ${h.texto}\nLink: ${h.link}`
+// ).join('\n\n');
+
+//////////////////////////////////////////////////////////////////////////qq
+
+  // 1. Buscar artigos recentes da cafeastrology (scraping simples)
+const personareUrl = 'https://cafeastrology.com/2025-horoscopes-overview.html';
+const personareRes = await fetch(personareUrl);
+const personareHtml = await personareRes.text();
+
+//2. Regex para capturar títulos e resumos dos artigos (ajustado para Personare)
+const articleRegex = /<a[^>]+class="ArticleListItem__Link[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
+const articles = [];
+let match;
+while ((match = articleRegex.exec(personareHtml)) !== null && articles.length < 3) {
+  const titleMatch = match[1].match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
+  const descMatch = match[1].match(/<p[^>]*>([\s\S]*?)<\/p>/);
+  const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+  const description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+  articles.push({ title, description, link: personareUrl });
+}
+
+// 3. Montar contexto com os artigos da Cafe Astrology
+const cafeAstrologyContext = articles.map(article =>
+  `Título: ${article.title}\nDescrição: ${article.description}\nLink: ${article.link}`
+).join('\n\n');
+  //////////////////////////////////////////////////////////////////////////////////
+  //Sempre considere todos os sites passados como referência para as respostas.
+
+
+ // 4. Montar prompt com contexto recuperado dos sites confiaveis
+  const prompt = `
+Você é um agente de IA que responde perguntas sobre astrologia, astronomia, fatos históricos e notícias atuais, usando apenas fontes confiáveis. 
+Responda em português do Brasil, citando apenas as informações do contexto abaixo e os links fornecidos. 
+Os dados vindos do site Cafe Astrology estão em inglês, mas o retorno das informações deve ser em português.
+
+Contexto extraído da Cafe Astrology:
+${cafeAstrologyContext}
+
+Contexto extraído da Cafe Astrology para horóscopo do dia:
+${horoscopoContext}
+
+// Contexto extraído da BBC:
+${bbccontext}
+
+Pergunta do usuário: ${question}
+
+Responda de forma clara, cite os links usados e não invente informações fora do contexto acima.
+`;
+  ////////////////////////////////////////////////////////////////////////////////
+
+//   // 5. Chamar a OpenAI
+//   const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+//     method: 'POST',
+//     headers: {
+//       'Content-Type': 'application/json',
+//       'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+//     },
+//     body: JSON.stringify({
+//       model: 'gpt-3.5-turbo',
+//       messages: [{ role: 'user', content: prompt }],
+//       max_tokens: 500,
+//       temperature: 0.2,
+//     }),
+//   });
+
+//   const openaiData = await openaiRes.json();
+//   console.log('Resposta da OpenAI:', openaiData);
+//   const answer = openaiData.choices?.[0]?.message?.content || 'Não foi possível obter uma resposta.';
+
+// ... código anterior de busca/contexto permanece igual ...
+// 5. Chamar a API da Anthropic (Claude)
+// const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+//   method: 'POST',
+//   headers: {
+//     'x-api-key': process.env.ANTHROPIC_API_KEY as string,
+//     'anthropic-version': '2023-06-01',
+//     'content-type': 'application/json',
+//   },
+//   body: JSON.stringify({
+//     model: 'claude-3-haiku-20240307', // ou outro modelo disponível na sua conta
+//     max_tokens: 500,
+//     temperature: 0.2,
+//     messages: [
+//       { role: 'user', content: prompt }
+//     ]
+//   }),
+// });
+
+// const anthropicData = await anthropicRes.json();
+// console.log('Resposta da Anthropic:', anthropicData);
+// const answer = anthropicData.content?.[0]?.text || 'Não foi possível obter uma resposta.';
+
+// ... código anterior de busca/contexto permanece igual ...
+
+// 5. Chamar o Ollama localmente
+const ollamaRes = await fetch('http://localhost:11434/api/chat', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    model: 'mistral', // ou 'llama2', 'llama3', 'gemma', 'deepseek', etc.
+    messages: [
+      { role: 'user', content: prompt }
+    ],
+    stream: false
+  }),
+});
+
+const ollamaData = await ollamaRes.json();
+console.log('Resposta da Anthropic:', ollamaData);
+const answer = ollamaData.message?.content || 'Não foi possível obter uma resposta.';
+
+return NextResponse.json({ answer });  
+}
