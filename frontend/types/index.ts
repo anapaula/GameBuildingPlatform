@@ -22,6 +22,8 @@ export interface Scenario {
   name: string
   description?: string
   image_url?: string
+  file_url?: string
+  file_content?: string
   phase: number
   order: number
   is_active: boolean

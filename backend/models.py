@@ -59,6 +59,8 @@ class Scenario(Base):
     name = Column(String, nullable=False)
     description = Column(Text)
     image_url = Column(String)
+    file_url = Column(String)  # URL do arquivo PDF, DOCX ou TXT
+    file_content = Column(Text)  # Conteúdo extraído do arquivo
     phase = Column(Integer, default=1)
     order = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)

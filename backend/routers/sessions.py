@@ -14,7 +14,14 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
     active_session = db.query(GameSession).filter(GameSession.player_id == current_user.id, GameSession.status == "active").first()
     if active_session:
         return active_session
-    db_session = GameSession(player_id=current_user.id, room_id=session_data.room_id, llm_provider=session_data.llm_provider, llm_model=session_data.llm_model, status="active")
+    db_session = GameSession(
+        player_id=current_user.id, 
+        room_id=session_data.room_id, 
+        llm_provider=session_data.llm_provider, 
+        llm_model=session_data.llm_model,
+        current_scenario_id=session_data.scenario_id,  # Mapear scenario_id para current_scenario_id
+        status="active"
+    )
     db.add(db_session)
     db.commit()
     db.refresh(db_session)

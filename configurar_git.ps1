@@ -121,3 +121,4 @@ Write-Host "  git commit -m 'msg' - Fazer commit" -ForegroundColor White
 Write-Host "  git push            - Enviar para GitHub" -ForegroundColor White
 Write-Host ""
 
+

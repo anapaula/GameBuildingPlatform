@@ -48,6 +48,7 @@ class RoomResponse(BaseModel):
         from_attributes = True
 
 class GameSessionCreate(BaseModel):
+    scenario_id: Optional[int] = None
     room_id: Optional[int] = None
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
@@ -94,6 +95,8 @@ class ScenarioCreate(BaseModel):
     name: str
     description: Optional[str] = None
     image_url: Optional[str] = None
+    file_url: Optional[str] = None
+    file_content: Optional[str] = None
     phase: int = 1
     order: int = 0
 
@@ -102,6 +105,8 @@ class ScenarioResponse(BaseModel):
     name: str
     description: Optional[str]
     image_url: Optional[str]
+    file_url: Optional[str]
+    file_content: Optional[str]
     phase: int
     order: int
     is_active: bool

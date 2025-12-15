@@ -72,6 +72,10 @@ export default function GamePage() {
   const [includeAudio, setIncludeAudio] = useState(false)
   const [activeAudio, setActiveAudio] = useState<HTMLAudioElement | null>(null)
   
+  // Estado para cenários (carregados automaticamente)
+  const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0)
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -130,32 +134,54 @@ export default function GamePage() {
     return () => clearTimeout(checkTimer)
   }, [_hasHydrated, isAuthenticated, token, user, router])
 
+  // Carregar cenários disponíveis (ordenados por order)
+  const loadScenarios = async () => {
+    try {
+      const response = await api.get('/api/game/config/scenarios')
+      const scenariosData = response.data || []
+      // Ordenar por order (já vem ordenado do backend, mas garantimos aqui também)
+      const sortedScenarios = [...scenariosData].sort((a, b) => a.order - b.order)
+      setScenarios(sortedScenarios)
+      return sortedScenarios
+    } catch (error: any) {
+      console.error('Erro ao carregar cenários:', error)
+      toast.error('Erro ao carregar cenários')
+      return []
+    }
+  }
+
   // Inicializar jogo
   const initializeGame = async () => {
     setInitializing(true)
     try {
-      // Verificar se há sessão ativa ou criar nova
+      // Verificar se há sessão ativa
       const sessionsResponse = await api.get('/api/sessions/')
       const sessions = sessionsResponse.data || []
       
       let activeSession = sessions.find((s: GameSession) => s.status === 'active')
       
       if (!activeSession) {
-        // Obter LLM ativa
-        let llmConfig = null
-        try {
-          const llmResponse = await api.get('/api/llm/active')
-          llmConfig = llmResponse.data
-        } catch (e) {
-          console.error('Erro ao obter LLM ativa:', e)
+        // Carregar cenários ordenados
+        const loadedScenarios = await loadScenarios()
+        
+        // Encontrar o cenário de introdução (que contém "Introdução" no nome do arquivo)
+        let introScenario = null
+        if (loadedScenarios.length > 0) {
+          introScenario = loadedScenarios.find((s: Scenario) => 
+            s.file_url && (
+              s.file_url.toLowerCase().includes('introdução') ||
+              s.file_url.toLowerCase().includes('introducao') ||
+              s.file_url.toLowerCase().includes('inicio')
+            )
+          ) || loadedScenarios[0] // Se não encontrar, usa o primeiro (que deve ser o de menor order)
+        
+          // Criar sessão com o cenário de introdução
+          await createSession(introScenario?.id || null)
+        } else {
+          // Se não houver cenários, criar sessão sem cenário
+          await createSession(null)
         }
-
-        // Criar nova sessão
-        const createResponse = await api.post('/api/sessions/', {
-          llm_provider: llmConfig?.provider,
-          llm_model: llmConfig?.model_name
-        })
-        activeSession = createResponse.data
+        return
       }
 
       setSession(activeSession)
@@ -169,6 +195,41 @@ export default function GamePage() {
       setInitializing(false)
     }
   }
+
+  // Criar sessão com cenário selecionado
+  const createSession = async (scenarioId: number | null) => {
+    setLoading(true)
+    try {
+      // Obter LLM ativa
+      let llmConfig = null
+      try {
+        const llmResponse = await api.get('/api/llm/active')
+        llmConfig = llmResponse.data
+      } catch (e) {
+        console.error('Erro ao obter LLM ativa:', e)
+      }
+
+      // Criar nova sessão com cenário
+      const createResponse = await api.post('/api/sessions/', {
+        llm_provider: llmConfig?.provider,
+        llm_model: llmConfig?.model_name,
+        scenario_id: scenarioId
+      })
+      
+      const activeSession = createResponse.data
+      setSession(activeSession)
+      
+      // Carregar histórico
+      await loadHistory(activeSession.id)
+    } catch (error: any) {
+      console.error('Erro ao criar sessão:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao criar sessão')
+    } finally {
+      setLoading(false)
+      setInitializing(false)
+    }
+  }
+
 
   // Carregar histórico
   const loadHistory = async (sessionId: number) => {
@@ -366,13 +427,24 @@ export default function GamePage() {
     )
   }
 
-  if (initializing) {
+  if (initializing || loadingScenarios) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-500 to-purple-600">
         <div className="text-center text-white">
           <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white mx-auto mb-4"></div>
           <p className="text-xl font-semibold">Carregando jogo...</p>
           <p className="text-sm mt-2 opacity-80">Aguarde enquanto preparamos sua aventura</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-500 to-purple-600">
+        <div className="text-center text-white">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white mx-auto mb-4"></div>
+          <p className="text-xl font-semibold">Preparando jogo...</p>
         </div>
       </div>
     )

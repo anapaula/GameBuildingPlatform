@@ -1,11 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
+from datetime import datetime
+from pathlib import Path
 from database import get_db
 from models import User, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult
 from schemas import GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
 from auth import get_current_admin_user
 from services.llm_service import LLMService
+from services.file_service import FileService
 
 router = APIRouter()
 
@@ -52,8 +55,51 @@ async def delete_game_rule(rule_id: int, db: Session = Depends(get_db), current_
     return {"message": "Regra desativada com sucesso"}
 
 @router.post("/scenarios", response_model=ScenarioResponse, status_code=201)
-async def create_scenario(scenario_data: ScenarioCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    db_scenario = Scenario(name=scenario_data.name, description=scenario_data.description, image_url=scenario_data.image_url, phase=scenario_data.phase, order=scenario_data.order)
+async def create_scenario(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    image_url: Optional[str] = Form(None),
+    phase: int = Form(1),
+    order: int = Form(0),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    file_url = None
+    file_content = None
+    
+    # Processar arquivo se fornecido
+    if file and file.filename:
+        allowed_extensions = ['.pdf', '.docx', '.doc', '.txt']
+        file_ext = Path(file.filename).suffix.lower()
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de arquivo não suportado. Use: {', '.join(allowed_extensions)}")
+        
+        try:
+            file_service = FileService()
+            file_data = await file.read()
+            
+            # Salvar arquivo
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_{timestamp}_{file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename)
+            
+            # Extrair texto do arquivo
+            file_content = await file_service.extract_text_from_file(file_path, file_ext)
+            file_url = file_service.get_file_url(file_path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
+    
+    db_scenario = Scenario(
+        name=name,
+        description=description,
+        image_url=image_url,
+        file_url=file_url,
+        file_content=file_content,
+        phase=phase,
+        order=order
+    )
     db.add(db_scenario)
     db.commit()
     db.refresh(db_scenario)
@@ -63,6 +109,80 @@ async def create_scenario(scenario_data: ScenarioCreate, db: Session = Depends(g
 async def list_scenarios(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     scenarios = db.query(Scenario).order_by(Scenario.order).offset(skip).limit(limit).all()
     return scenarios
+
+@router.put("/scenarios/{scenario_id}", response_model=ScenarioResponse)
+async def update_scenario(
+    scenario_id: int,
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    image_url: Optional[str] = Form(None),
+    phase: int = Form(1),
+    order: int = Form(0),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    
+    # Processar arquivo se fornecido
+    if file and file.filename:
+        allowed_extensions = ['.pdf', '.docx', '.doc', '.txt']
+        file_ext = Path(file.filename).suffix.lower()
+        
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de arquivo não suportado. Use: {', '.join(allowed_extensions)}")
+        
+        try:
+            file_service = FileService()
+            file_data = await file.read()
+            
+            # Salvar arquivo
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_{timestamp}_{file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename)
+            
+            # Extrair texto do arquivo
+            file_content = await file_service.extract_text_from_file(file_path, file_ext)
+            file_url = file_service.get_file_url(file_path)
+            
+            scenario.file_url = file_url
+            scenario.file_content = file_content
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
+    
+    # Atualizar outros campos
+    scenario.name = name
+    scenario.description = description
+    scenario.image_url = image_url
+    scenario.phase = phase
+    scenario.order = order
+    
+    db.commit()
+    db.refresh(scenario)
+    return scenario
+
+@router.get("/scenarios/files/{filename}")
+async def get_scenario_file(filename: str, current_user: User = Depends(get_current_admin_user)):
+    """Serve arquivos de cenários"""
+    from fastapi.responses import FileResponse
+    file_service = FileService()
+    file_path = file_service.upload_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    
+    # Determinar content-type baseado na extensão
+    ext = Path(filename).suffix.lower()
+    media_types = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.txt': 'text/plain'
+    }
+    media_type = media_types.get(ext, 'application/octet-stream')
+    
+    return FileResponse(str(file_path), media_type=media_type)
 
 @router.post("/llm/configs", response_model=LLMConfigResponse, status_code=201)
 async def create_llm_config(config_data: LLMConfigCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
