@@ -14,7 +14,18 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
     active_session = db.query(GameSession).filter(GameSession.player_id == current_user.id, GameSession.status == "active").first()
     if active_session:
         return active_session
+    # Se não houver game_id, buscar o primeiro jogo ativo
+    game_id = session_data.game_id
+    if not game_id:
+        from models import Game
+        first_game = db.query(Game).filter(Game.is_active == True).order_by(Game.created_at).first()
+        if first_game:
+            game_id = first_game.id
+        else:
+            raise HTTPException(status_code=400, detail="Nenhum jogo disponível. Crie um jogo primeiro.")
+    
     db_session = GameSession(
+        game_id=game_id,
         player_id=current_user.id, 
         room_id=session_data.room_id, 
         llm_provider=session_data.llm_provider, 

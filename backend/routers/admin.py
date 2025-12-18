@@ -4,25 +4,216 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import User, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult
-from schemas import GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
+from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult
+from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
 from auth import get_current_admin_user
 from services.llm_service import LLMService
 from services.file_service import FileService
 
 router = APIRouter()
 
+# ========== GAMES ==========
+@router.post("/games", response_model=GameResponse, status_code=201)
+async def create_game(
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    cover_image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    cover_image_url = None
+    
+    # Processar upload da imagem de capa
+    if cover_image and cover_image.filename:
+        try:
+            file_data = await cover_image.read()
+            file_service = FileService()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"game_cover_{timestamp}_{cover_image.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="game_cover")
+            cover_image_url = file_service.get_file_url(file_path, file_type="game_cover")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
+    
+    db_game = Game(
+        title=title,
+        description=description,
+        cover_image_url=cover_image_url
+    )
+    db.add(db_game)
+    db.commit()
+    db.refresh(db_game)
+    return db_game
+
+@router.get("/games", response_model=List[GameResponse])
+async def list_games(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    games = db.query(Game).order_by(Game.created_at.desc()).offset(skip).limit(limit).all()
+    return games
+
+@router.get("/games/{game_id}", response_model=GameResponse)
+async def get_game(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado")
+    return game
+
+@router.put("/games/{game_id}", response_model=GameResponse)
+async def update_game(
+    game_id: int,
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    cover_image: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado")
+    
+    # Processar upload da imagem de capa se fornecido
+    if cover_image and cover_image.filename:
+        try:
+            file_data = await cover_image.read()
+            file_service = FileService()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"game_cover_{timestamp}_{cover_image.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="game_cover")
+            game.cover_image_url = file_service.get_file_url(file_path, file_type="game_cover")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
+    
+    game.title = title
+    game.description = description
+    
+    db.commit()
+    db.refresh(game)
+    return game
+
+@router.delete("/games/{game_id}")
+async def delete_game(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    from models import Scenario, GameRule, LLMConfiguration, GameSession, LLMTestResult, SessionInteraction, SessionScenario
+    
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado")
+    
+    # Deletar registros relacionados manualmente para garantir que funciona
+    # (mesmo com cascade, é mais seguro fazer explicitamente)
+    try:
+        # Primeiro, obter todas as LLM configurations do jogo
+        llm_configs = db.query(LLMConfiguration).filter(LLMConfiguration.game_id == game_id).all()
+        llm_config_ids = [config.id for config in llm_configs]
+        
+        # Deletar LLM test results relacionados às configurações
+        if llm_config_ids:
+            db.query(LLMTestResult).filter(LLMTestResult.llm_config_id.in_(llm_config_ids)).delete()
+        
+        # Deletar LLM configurations
+        db.query(LLMConfiguration).filter(LLMConfiguration.game_id == game_id).delete()
+        
+        # Obter todas as sessions do jogo
+        sessions = db.query(GameSession).filter(GameSession.game_id == game_id).all()
+        session_ids = [session.id for session in sessions]
+        
+        # Deletar session interactions relacionados às sessions
+        if session_ids:
+            db.query(SessionInteraction).filter(SessionInteraction.session_id.in_(session_ids)).delete()
+        
+        # Deletar session scenarios relacionados às sessions
+        if session_ids:
+            db.query(SessionScenario).filter(SessionScenario.session_id.in_(session_ids)).delete()
+        
+        # Deletar game sessions
+        db.query(GameSession).filter(GameSession.game_id == game_id).delete()
+        
+        # Deletar scenarios (que já tem cascade para session_scenarios)
+        db.query(Scenario).filter(Scenario.game_id == game_id).delete()
+        
+        # Deletar game rules
+        db.query(GameRule).filter(GameRule.game_id == game_id).delete()
+        
+        # Agora deletar o jogo
+        db.delete(game)
+        db.commit()
+        
+        return {"message": "Jogo deletado com sucesso"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar jogo: {str(e)}")
+
+@router.get("/games/covers/{filename}")
+async def get_game_cover(filename: str):
+    """Serve imagens de capa dos jogos (público para permitir exibição em tags img)"""
+    from fastapi.responses import FileResponse
+    file_service = FileService()
+    # Resolver para caminho absoluto
+    game_covers_dir = file_service.game_covers_dir.resolve()
+    file_path = game_covers_dir / filename
+    
+    # Validar que o arquivo está no diretório correto (segurança)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Arquivo não encontrado: {filename} em {game_covers_dir}")
+    
+    # Verificar que o arquivo está dentro do diretório de capas (segurança)
+    try:
+        file_path.resolve().relative_to(game_covers_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+    
+    # Determinar content-type baseado na extensão
+    ext = Path(filename).suffix.lower()
+    media_types = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    media_type = media_types.get(ext, 'image/jpeg')
+    
+    return FileResponse(str(file_path.resolve()), media_type=media_type)
+
+# ========== GAME RULES ==========
 @router.post("/rules", response_model=GameRuleResponse, status_code=201)
 async def create_game_rule(rule_data: GameRuleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    db_rule = GameRule(title=rule_data.title, description=rule_data.description, rule_type=rule_data.rule_type, content=rule_data.content, created_by=current_user.id)
+    db_rule = GameRule(
+        game_id=rule_data.game_id,
+        title=rule_data.title,
+        description=rule_data.description,
+        rule_type=rule_data.rule_type,
+        content=rule_data.content,
+        created_by=current_user.id
+    )
     db.add(db_rule)
     db.commit()
     db.refresh(db_rule)
     return db_rule
 
 @router.get("/rules", response_model=List[GameRuleResponse])
-async def list_game_rules(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    rules = db.query(GameRule).offset(skip).limit(limit).all()
+async def list_game_rules(
+    game_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    query = db.query(GameRule)
+    if game_id:
+        query = query.filter(GameRule.game_id == game_id)
+    rules = query.offset(skip).limit(limit).all()
     return rules
 
 @router.get("/rules/{rule_id}", response_model=GameRuleResponse)
@@ -37,6 +228,7 @@ async def update_game_rule(rule_id: int, rule_data: GameRuleCreate, db: Session 
     rule = db.query(GameRule).filter(GameRule.id == rule_id).first()
     if not rule:
         raise HTTPException(status_code=404, detail="Regra não encontrada")
+    rule.game_id = rule_data.game_id
     rule.title = rule_data.title
     rule.description = rule_data.description
     rule.rule_type = rule_data.rule_type
@@ -56,6 +248,7 @@ async def delete_game_rule(rule_id: int, db: Session = Depends(get_db), current_
 
 @router.post("/scenarios", response_model=ScenarioResponse, status_code=201)
 async def create_scenario(
+    game_id: int = Form(...),
     name: str = Form(...),
     description: Optional[str] = Form(None),
     image_url: Optional[str] = Form(None),
@@ -92,6 +285,7 @@ async def create_scenario(
             raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
     
     db_scenario = Scenario(
+        game_id=game_id,
         name=name,
         description=description,
         image_url=image_url,
@@ -106,13 +300,23 @@ async def create_scenario(
     return db_scenario
 
 @router.get("/scenarios", response_model=List[ScenarioResponse])
-async def list_scenarios(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    scenarios = db.query(Scenario).order_by(Scenario.order).offset(skip).limit(limit).all()
+async def list_scenarios(
+    game_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    query = db.query(Scenario)
+    if game_id:
+        query = query.filter(Scenario.game_id == game_id)
+    scenarios = query.order_by(Scenario.order).offset(skip).limit(limit).all()
     return scenarios
 
 @router.put("/scenarios/{scenario_id}", response_model=ScenarioResponse)
 async def update_scenario(
     scenario_id: int,
+    game_id: int = Form(...),
     name: str = Form(...),
     description: Optional[str] = Form(None),
     image_url: Optional[str] = Form(None),
@@ -153,6 +357,7 @@ async def update_scenario(
             raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
     
     # Atualizar outros campos
+    scenario.game_id = game_id
     scenario.name = name
     scenario.description = description
     scenario.image_url = image_url
@@ -186,15 +391,30 @@ async def get_scenario_file(filename: str, current_user: User = Depends(get_curr
 
 @router.post("/llm/configs", response_model=LLMConfigResponse, status_code=201)
 async def create_llm_config(config_data: LLMConfigCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    db_config = LLMConfiguration(provider=config_data.provider, model_name=config_data.model_name, api_key=config_data.api_key, cost_per_token=config_data.cost_per_token, max_tokens=config_data.max_tokens, temperature=config_data.temperature)
+    db_config = LLMConfiguration(
+        game_id=config_data.game_id,
+        provider=config_data.provider,
+        model_name=config_data.model_name,
+        api_key=config_data.api_key,
+        cost_per_token=config_data.cost_per_token,
+        max_tokens=config_data.max_tokens,
+        temperature=config_data.temperature
+    )
     db.add(db_config)
     db.commit()
     db.refresh(db_config)
     return db_config
 
 @router.get("/llm/configs", response_model=List[LLMConfigResponse])
-async def list_llm_configs(db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
-    configs = db.query(LLMConfiguration).all()
+async def list_llm_configs(
+    game_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    query = db.query(LLMConfiguration)
+    if game_id:
+        query = query.filter(LLMConfiguration.game_id == game_id)
+    configs = query.all()
     return configs
 
 @router.get("/llm/configs/{config_id}", response_model=LLMConfigResponse)

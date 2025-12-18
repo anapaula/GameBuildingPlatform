@@ -1,24 +1,33 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { LLMConfiguration } from '@/types'
 import { Plus, CheckCircle, XCircle, Play, Edit, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
 
 export default function LLMsPage() {
+  const router = useRouter()
+  const { selectedGameId } = useSelectedGame()
   const [configs, setConfigs] = useState<LLMConfiguration[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingConfig, setEditingConfig] = useState<LLMConfiguration | null>(null)
 
   useEffect(() => {
+    if (!selectedGameId) {
+      router.push('/admin')
+      return
+    }
     fetchConfigs()
-  }, [])
+  }, [selectedGameId, router])
 
   const fetchConfigs = async () => {
+    if (!selectedGameId) return
     try {
-      const res = await api.get('/api/admin/llm/configs')
+      const res = await api.get(`/api/admin/llm/configs?game_id=${selectedGameId}`)
       setConfigs(res.data)
     } catch (error) {
       toast.error('Erro ao carregar configurações de LLM')
@@ -201,6 +210,7 @@ function LLMConfigModal({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const { selectedGameId } = useSelectedGame()
   const isEditing = !!config
   const [formData, setFormData] = useState({
     provider: (config?.provider || 'openai') as 'openai' | 'anthropic',
@@ -236,6 +246,10 @@ function LLMConfigModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!selectedGameId) {
+      toast.error('Jogo não selecionado')
+      return
+    }
     try {
       if (isEditing && config) {
         // Atualizar - só envia campos que foram alterados
@@ -264,6 +278,7 @@ function LLMConfigModal({
         }
         toast.loading('Criando configuração...', { id: 'save-llm' })
         await api.post('/api/admin/llm/configs', {
+          game_id: selectedGameId,
           ...formData,
           cost_per_token: formData.cost_per_token ? parseFloat(formData.cost_per_token) : null,
           max_tokens: formData.max_tokens ? parseInt(formData.max_tokens) : null,

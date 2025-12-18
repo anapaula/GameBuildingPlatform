@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
@@ -19,9 +19,16 @@ async def get_available_llms(db: Session = Depends(get_db), current_user: User =
     return configs
 
 @router.get("/config/scenarios")
-async def get_available_scenarios(db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    """Retorna todos os cenários disponíveis"""
-    scenarios = db.query(Scenario).filter(Scenario.is_active == True).order_by(Scenario.order).all()
+async def get_available_scenarios(
+    game_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retorna todos os cenários disponíveis para um jogo específico"""
+    query = db.query(Scenario).filter(Scenario.is_active == True)
+    if game_id:
+        query = query.filter(Scenario.game_id == game_id)
+    scenarios = query.order_by(Scenario.order).all()
     return scenarios
 
 @router.post("/interact", response_model=InteractionResponse)
@@ -36,7 +43,11 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
     existing_interactions = db.query(SessionInteraction).filter(SessionInteraction.session_id == session.id).count()
     is_first_interaction = existing_interactions == 0
     
-    game_rules = db.query(GameRule).filter(GameRule.is_active == True).all()
+    # Buscar regras do jogo da sessão
+    game_rules = db.query(GameRule).filter(
+        GameRule.game_id == session.game_id,
+        GameRule.is_active == True
+    ).all()
     current_scenario = None
     if session.current_scenario_id:
         current_scenario = db.query(Scenario).filter(Scenario.id == session.current_scenario_id).first()

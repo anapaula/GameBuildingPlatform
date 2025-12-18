@@ -3,6 +3,23 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 from models import UserRole, LLMProvider
 
+class GameCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+
+class GameResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str]
+    cover_image_url: Optional[str]
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime]
+    
+    class Config:
+        from_attributes = True
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -48,6 +65,7 @@ class RoomResponse(BaseModel):
         from_attributes = True
 
 class GameSessionCreate(BaseModel):
+    game_id: Optional[int] = None
     scenario_id: Optional[int] = None
     room_id: Optional[int] = None
     llm_provider: Optional[str] = None
@@ -55,6 +73,7 @@ class GameSessionCreate(BaseModel):
 
 class GameSessionResponse(BaseModel):
     id: int
+    game_id: int
     player_id: int
     room_id: Optional[int]
     current_scenario_id: Optional[int]
@@ -92,6 +111,7 @@ class InteractionResponse(BaseModel):
         from_attributes = True
 
 class ScenarioCreate(BaseModel):
+    game_id: int
     name: str
     description: Optional[str] = None
     image_url: Optional[str] = None
@@ -102,6 +122,7 @@ class ScenarioCreate(BaseModel):
 
 class ScenarioResponse(BaseModel):
     id: int
+    game_id: int
     name: str
     description: Optional[str]
     image_url: Optional[str]
@@ -116,6 +137,7 @@ class ScenarioResponse(BaseModel):
         from_attributes = True
 
 class GameRuleCreate(BaseModel):
+    game_id: int
     title: str
     description: Optional[str] = None
     rule_type: str
@@ -123,6 +145,7 @@ class GameRuleCreate(BaseModel):
 
 class GameRuleResponse(BaseModel):
     id: int
+    game_id: int
     title: str
     description: Optional[str]
     rule_type: str
@@ -134,6 +157,7 @@ class GameRuleResponse(BaseModel):
         from_attributes = True
 
 class LLMConfigCreate(BaseModel):
+    game_id: int
     provider: LLMProvider
     model_name: str
     api_key: str
@@ -151,6 +175,7 @@ class LLMConfigUpdate(BaseModel):
 
 class LLMConfigResponse(BaseModel):
     id: int
+    game_id: int
     provider: LLMProvider
     model_name: str
     is_active: bool

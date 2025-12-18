@@ -135,9 +135,12 @@ export default function GamePage() {
   }, [_hasHydrated, isAuthenticated, token, user, router])
 
   // Carregar cenários disponíveis (ordenados por order)
-  const loadScenarios = async () => {
+  const loadScenarios = async (gameId: number | null = null) => {
     try {
-      const response = await api.get('/api/game/config/scenarios')
+      const url = gameId 
+        ? `/api/game/config/scenarios?game_id=${gameId}`
+        : '/api/game/config/scenarios'
+      const response = await api.get(url)
       const scenariosData = response.data || []
       // Ordenar por order (já vem ordenado do backend, mas garantimos aqui também)
       const sortedScenarios = [...scenariosData].sort((a, b) => a.order - b.order)
@@ -161,8 +164,20 @@ export default function GamePage() {
       let activeSession = sessions.find((s: GameSession) => s.status === 'active')
       
       if (!activeSession) {
-        // Carregar cenários ordenados
-        const loadedScenarios = await loadScenarios()
+        // Buscar o primeiro jogo ativo para filtrar cenários
+        let gameId = null
+        try {
+          const gamesResponse = await api.get('/api/admin/games')
+          const games = gamesResponse.data || []
+          if (games.length > 0) {
+            gameId = games[0].id // Usar o primeiro jogo
+          }
+        } catch (e) {
+          console.error('Erro ao buscar jogos:', e)
+        }
+
+        // Carregar cenários ordenados (filtrando por game_id se disponível)
+        const loadedScenarios = await loadScenarios(gameId)
         
         // Encontrar o cenário de introdução (que contém "Introdução" no nome do arquivo)
         let introScenario = null
@@ -176,10 +191,10 @@ export default function GamePage() {
           ) || loadedScenarios[0] // Se não encontrar, usa o primeiro (que deve ser o de menor order)
         
           // Criar sessão com o cenário de introdução
-          await createSession(introScenario?.id || null)
+          await createSession(introScenario?.id || null, gameId)
         } else {
           // Se não houver cenários, criar sessão sem cenário
-          await createSession(null)
+          await createSession(null, gameId)
         }
         return
       }
@@ -197,13 +212,29 @@ export default function GamePage() {
   }
 
   // Criar sessão com cenário selecionado
-  const createSession = async (scenarioId: number | null) => {
+  const createSession = async (scenarioId: number | null, gameId: number | null = null) => {
     setLoading(true)
     try {
-      // Obter LLM ativa
+      // Se gameId não foi fornecido, buscar o primeiro jogo ativo
+      if (!gameId) {
+        try {
+          const gamesResponse = await api.get('/api/admin/games')
+          const games = gamesResponse.data || []
+          if (games.length > 0) {
+            gameId = games[0].id // Usar o primeiro jogo
+          }
+        } catch (e) {
+          console.error('Erro ao buscar jogos:', e)
+        }
+      }
+
+      // Obter LLM ativa (filtrando por game_id se disponível)
       let llmConfig = null
       try {
-        const llmResponse = await api.get('/api/llm/active')
+        const llmUrl = gameId 
+          ? `/api/llm/active?game_id=${gameId}`
+          : '/api/llm/active'
+        const llmResponse = await api.get(llmUrl)
         llmConfig = llmResponse.data
       } catch (e) {
         console.error('Erro ao obter LLM ativa:', e)
@@ -211,6 +242,7 @@ export default function GamePage() {
 
       // Criar nova sessão com cenário
       const createResponse = await api.post('/api/sessions/', {
+        game_id: gameId,
         llm_provider: llmConfig?.provider,
         llm_model: llmConfig?.model_name,
         scenario_id: scenarioId
@@ -224,6 +256,7 @@ export default function GamePage() {
     } catch (error: any) {
       console.error('Erro ao criar sessão:', error)
       toast.error(error.response?.data?.detail || 'Erro ao criar sessão')
+      throw error // Re-throw para que o initializeGame possa tratar
     } finally {
       setLoading(false)
       setInitializing(false)
@@ -427,7 +460,7 @@ export default function GamePage() {
     )
   }
 
-  if (initializing || loadingScenarios) {
+  if (initializing) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-500 to-purple-600">
         <div className="text-center text-white">

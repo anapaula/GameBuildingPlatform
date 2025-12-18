@@ -10,10 +10,18 @@ class FileService:
     def __init__(self):
         self.upload_dir = Path(os.getenv("SCENARIO_FILES_DIR", "./scenario_files"))
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        # Diretório para capas de jogos
+        self.game_covers_dir = Path(os.getenv("GAME_COVERS_DIR", "./game_covers"))
+        self.game_covers_dir.mkdir(parents=True, exist_ok=True)
     
-    async def save_uploaded_file(self, file_data: bytes, filename: str) -> str:
-        """Salva arquivo enviado e retorna o caminho"""
-        file_path = self.upload_dir / filename
+    async def save_uploaded_file(self, file_data: bytes, filename: str, file_type: str = "scenario") -> str:
+        """Salva arquivo enviado e retorna o caminho
+        file_type: 'scenario' ou 'game_cover'
+        """
+        if file_type == "game_cover":
+            file_path = self.game_covers_dir / filename
+        else:
+            file_path = self.upload_dir / filename
         async with aiofiles.open(file_path, 'wb') as f:
             await f.write(file_data)
         return str(file_path)
@@ -55,8 +63,12 @@ class FileService:
             text = await f.read()
         return text.strip()
     
-    def get_file_url(self, file_path: str) -> str:
-        """Retorna URL relativa para acessar o arquivo"""
+    def get_file_url(self, file_path: str, file_type: str = "scenario") -> str:
+        """Retorna URL relativa para acessar o arquivo
+        file_type: 'scenario' ou 'game_cover'
+        """
         filename = Path(file_path).name
+        if file_type == "game_cover":
+            return f"/api/admin/games/covers/{filename}"
         return f"/api/admin/scenarios/files/{filename}"
 

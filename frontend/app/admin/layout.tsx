@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import Link from 'next/link'
 import { LogOut, Gamepad2, Settings, BarChart3, Users, BookOpen, Brain } from 'lucide-react'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
+import api from '@/lib/api'
 
 export default function AdminLayout({
   children,
@@ -12,8 +14,54 @@ export default function AdminLayout({
   children: React.ReactNode
 }) {
   const router = useRouter()
+  const pathname = usePathname()
   const { user, logout, isAuthenticated, token, _hasHydrated } = useAuthStore()
+  const { selectedGameId } = useSelectedGame()
+  const [selectedGame, setSelectedGame] = useState<any>(null)
   const [mounted, setMounted] = useState(false)
+  
+  // Carregar informações do jogo selecionado
+  useEffect(() => {
+    if (selectedGameId) {
+      api.get(`/api/admin/games/${selectedGameId}`)
+        .then((res: any) => setSelectedGame(res.data))
+        .catch(() => setSelectedGame(null))
+    } else {
+      setSelectedGame(null)
+    }
+  }, [selectedGameId])
+  
+  // Listener para mudanças no localStorage (mesma aba)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('selectedGameId')
+        if (stored) {
+          const gameId = parseInt(stored)
+          api.get(`/api/admin/games/${gameId}`)
+            .then((res: any) => setSelectedGame(res.data))
+            .catch(() => setSelectedGame(null))
+        } else {
+          setSelectedGame(null)
+        }
+      }
+    }
+    
+    // Polling para detectar mudanças no localStorage (mesma aba)
+    const interval = setInterval(() => {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('selectedGameId')
+        const currentId = stored ? parseInt(stored) : null
+        if (currentId && currentId !== selectedGameId) {
+          handleStorageChange()
+        }
+      }
+    }, 200)
+    
+    return () => {
+      clearInterval(interval)
+    }
+  }, [selectedGameId])
 
   useEffect(() => {
     setMounted(true)
@@ -97,6 +145,9 @@ export default function AdminLayout({
     )
   }
 
+  // Se estiver na página de seleção de jogos, mostrar apenas header simples
+  const isGamesPage = pathname === '/admin'
+  
   return (
     <div className="min-h-screen bg-gray-100">
       <nav className="bg-white shadow-lg">
@@ -109,46 +160,75 @@ export default function AdminLayout({
                   Admin Dashboard
                 </span>
               </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <Link
-                  href="/admin"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-900 hover:text-blue-600 border-b-2 border-blue-600"
-                >
-                  <Settings className="h-4 w-4 mr-1" />
-                  Dashboard
-                </Link>
-                <Link
-                  href="/admin/rules"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
-                >
-                  <BookOpen className="h-4 w-4 mr-1" />
-                  Regras
-                </Link>
-                <Link
-                  href="/admin/llms"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
-                >
-                  <Brain className="h-4 w-4 mr-1" />
-                  LLMs
-                </Link>
-                <Link
-                  href="/admin/sessions"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
-                >
-                  <BarChart3 className="h-4 w-4 mr-1" />
-                  Sessões
-                </Link>
-                <Link
-                  href="/admin/users"
-                  className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
-                >
-                  <Users className="h-4 w-4 mr-1" />
-                  Usuários
-                </Link>
-              </div>
+              {!isGamesPage && (
+                <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+                  <Link
+                    href="/admin"
+                    className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
+                  >
+                    <Settings className="h-4 w-4 mr-1" />
+                    Jogos
+                  </Link>
+                  {selectedGameId && (
+                    <>
+                      <Link
+                        href="/admin/rules"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/rules' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <BookOpen className="h-4 w-4 mr-1" />
+                        Regras
+                      </Link>
+                      <Link
+                        href="/admin/scenarios"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/scenarios' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <BookOpen className="h-4 w-4 mr-1" />
+                        Cenários
+                      </Link>
+                      <Link
+                        href="/admin/llms"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/llms' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <Brain className="h-4 w-4 mr-1" />
+                        LLMs
+                      </Link>
+                      <Link
+                        href="/admin/sessions"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/sessions' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <BarChart3 className="h-4 w-4 mr-1" />
+                        Sessões
+                      </Link>
+                      <Link
+                        href="/admin/users"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/users' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <Users className="h-4 w-4 mr-1" />
+                        Usuários
+                      </Link>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">
+            <div className="flex items-center gap-4">
+              {!isGamesPage && selectedGame && (
+                <div className="text-sm">
+                  <span className="text-gray-500">Jogo:</span>
+                  <span className="ml-2 font-medium text-gray-900">{selectedGame.title}</span>
+                </div>
+              )}
+              <span className="text-sm text-gray-700">
                 {finalUser?.username}
               </span>
               <button
@@ -168,4 +248,5 @@ export default function AdminLayout({
     </div>
   )
 }
+
 

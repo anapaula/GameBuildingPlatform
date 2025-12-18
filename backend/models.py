@@ -52,10 +52,27 @@ class RoomMember(Base):
     room = relationship("Room", back_populates="members")
     user = relationship("User", back_populates="room_memberships")
 
+class Game(Base):
+    __tablename__ = "games"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    cover_image_url = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    scenarios = relationship("Scenario", back_populates="game", cascade="all, delete-orphan")
+    rules = relationship("GameRule", back_populates="game", cascade="all, delete-orphan")
+    llm_configs = relationship("LLMConfiguration", back_populates="game", cascade="all, delete-orphan")
+    sessions = relationship("GameSession", back_populates="game", cascade="all, delete-orphan")
+
 class Scenario(Base):
     __tablename__ = "scenarios"
     
     id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text)
     image_url = Column(String)
@@ -67,12 +84,14 @@ class Scenario(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
+    game = relationship("Game", back_populates="scenarios")
     session_scenarios = relationship("SessionScenario", back_populates="scenario")
 
 class GameSession(Base):
     __tablename__ = "game_sessions"
     
     id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
     player_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     room_id = Column(Integer, ForeignKey("rooms.id"))
     current_scenario_id = Column(Integer, ForeignKey("scenarios.id"))
@@ -84,6 +103,7 @@ class GameSession(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_activity = Column(DateTime(timezone=True), server_default=func.now())
     
+    game = relationship("Game", back_populates="sessions")
     player = relationship("User", back_populates="sessions")
     room = relationship("Room", back_populates="sessions")
     interactions = relationship("SessionInteraction", back_populates="session")
@@ -125,6 +145,7 @@ class GameRule(Base):
     __tablename__ = "game_rules"
     
     id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
     title = Column(String, nullable=False)
     description = Column(Text)
     rule_type = Column(String)
@@ -133,11 +154,14 @@ class GameRule(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    game = relationship("Game", back_populates="rules")
 
 class LLMConfiguration(Base):
     __tablename__ = "llm_configurations"
     
     id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
     provider = Column(SQLEnum(LLMProvider), nullable=False)
     model_name = Column(String, nullable=False)
     api_key = Column(String, nullable=False)
@@ -151,6 +175,8 @@ class LLMConfiguration(Base):
     total_tokens = Column(Integer, default=0)
     total_cost = Column(Float, default=0.0)
     avg_response_time = Column(Float, default=0.0)
+    
+    game = relationship("Game", back_populates="llm_configs")
 
 class LLMTestResult(Base):
     __tablename__ = "llm_test_results"

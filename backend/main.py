@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 import uvicorn
 
 from database import SessionLocal, engine, Base
-from routers import auth, users, rooms, sessions, admin, game, llm_config, audio
+from routers import auth, users, rooms, sessions, admin, game, llm_config, audio, games
 from models import User, Room, GameSession, Scenario
 
 # Criar tabelas
@@ -35,6 +35,7 @@ app.include_router(admin.router, prefix="/api/admin", tags=["Admin"])
 app.include_router(game.router, prefix="/api/game", tags=["Jogo"])
 app.include_router(llm_config.router, prefix="/api/llm", tags=["LLM"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Áudio"])
+app.include_router(games.router, prefix="/api/admin/games", tags=["Jogos"])
 
 @app.get("/")
 async def root():

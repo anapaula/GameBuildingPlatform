@@ -9,6 +9,7 @@ export interface User {
 
 export interface GameRule {
   id: number
+  game_id: number
   title: string
   description?: string
   rule_type: string
@@ -17,8 +18,19 @@ export interface GameRule {
   created_at: string
 }
 
+export interface Game {
+  id: number
+  title: string
+  description?: string
+  cover_image_url?: string
+  is_active: boolean
+  created_at: string
+  updated_at?: string
+}
+
 export interface Scenario {
   id: number
+  game_id: number
   name: string
   description?: string
   image_url?: string
@@ -32,6 +44,7 @@ export interface Scenario {
 
 export interface LLMConfiguration {
   id: number
+  game_id: number
   provider: 'openai' | 'anthropic'
   model_name: string
   is_active: boolean

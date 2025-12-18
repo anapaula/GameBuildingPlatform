@@ -1,24 +1,33 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { GameRule } from '@/types'
 import { Plus, Edit, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
 
 export default function RulesPage() {
+  const router = useRouter()
+  const { selectedGameId } = useSelectedGame()
   const [rules, setRules] = useState<GameRule[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editingRule, setEditingRule] = useState<GameRule | null>(null)
 
   useEffect(() => {
+    if (!selectedGameId) {
+      router.push('/admin')
+      return
+    }
     fetchRules()
-  }, [])
+  }, [selectedGameId, router])
 
   const fetchRules = async () => {
+    if (!selectedGameId) return
     try {
-      const res = await api.get('/api/admin/rules')
+      const res = await api.get(`/api/admin/rules?game_id=${selectedGameId}`)
       setRules(res.data)
     } catch (error) {
       toast.error('Erro ao carregar regras')
@@ -134,6 +143,7 @@ function RuleModal({
   onClose: () => void
   onSuccess: () => void
 }) {
+  const { selectedGameId } = useSelectedGame()
   const [formData, setFormData] = useState({
     title: rule?.title || '',
     description: rule?.description || '',
@@ -143,12 +153,17 @@ function RuleModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!selectedGameId) {
+      toast.error('Jogo não selecionado')
+      return
+    }
     try {
+      const dataToSend = { ...formData, game_id: selectedGameId }
       if (rule) {
-        await api.put(`/api/admin/rules/${rule.id}`, formData)
+        await api.put(`/api/admin/rules/${rule.id}`, dataToSend)
         toast.success('Regra atualizada')
       } else {
-        await api.post('/api/admin/rules', formData)
+        await api.post('/api/admin/rules', dataToSend)
         toast.success('Regra criada')
       }
       onSuccess()

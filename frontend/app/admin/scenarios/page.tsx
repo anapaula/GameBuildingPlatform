@@ -1,12 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { Scenario } from '@/types'
 import { Plus, Edit, Trash2, Upload, FileText, Eye, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
 
 export default function ScenariosPage() {
+  const router = useRouter()
+  const { selectedGameId } = useSelectedGame()
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -14,12 +18,18 @@ export default function ScenariosPage() {
   const [viewingContent, setViewingContent] = useState<{ name: string; file_content: string } | null>(null)
 
   useEffect(() => {
+    if (!selectedGameId) {
+      // Se não houver jogo selecionado, redirecionar para a página de jogos
+      router.push('/admin')
+      return
+    }
     fetchScenarios()
-  }, [])
+  }, [selectedGameId, router])
 
   const fetchScenarios = async () => {
+    if (!selectedGameId) return
     try {
-      const res = await api.get('/api/admin/scenarios')
+      const res = await api.get(`/api/admin/scenarios?game_id=${selectedGameId}`)
       setScenarios(res.data)
     } catch (error) {
       toast.error('Erro ao carregar cenários')
@@ -267,9 +277,15 @@ function ScenarioModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
+      if (!selectedGameId) {
+        toast.error('Jogo não selecionado')
+        return
+      }
+      
       if (scenario) {
         // Para edição, sempre usar FormData
         const formDataToSend = new FormData()
+        formDataToSend.append('game_id', selectedGameId.toString())
         formDataToSend.append('name', formData.name)
         formDataToSend.append('description', formData.description || '')
         formDataToSend.append('image_url', formData.image_url || '')
@@ -300,6 +316,7 @@ function ScenarioModal({
         // Para criação, usar FormData se houver arquivo
         if (selectedFile) {
           const formDataToSend = new FormData()
+          formDataToSend.append('game_id', selectedGameId.toString())
           formDataToSend.append('name', formData.name)
           formDataToSend.append('description', formData.description || '')
           formDataToSend.append('image_url', formData.image_url || '')
@@ -319,7 +336,18 @@ function ScenarioModal({
             setFileContentPreview(response.data.file_content)
           }
         } else {
-          await api.post('/api/admin/scenarios', formData)
+          const formDataToSend = new FormData()
+          formDataToSend.append('game_id', selectedGameId.toString())
+          formDataToSend.append('name', formData.name)
+          formDataToSend.append('description', formData.description || '')
+          formDataToSend.append('image_url', formData.image_url || '')
+          formDataToSend.append('phase', formData.phase.toString())
+          formDataToSend.append('order', formData.order.toString())
+          await api.post('/api/admin/scenarios', formDataToSend, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            },
+          })
           toast.success('Cenário criado')
         }
       }
