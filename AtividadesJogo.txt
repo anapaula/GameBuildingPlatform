@@ -1,0 +1,22 @@
+Camada de seleção de jogo
+Camada de seleção das salas de jogo (podendo criar uma nova sala ou acessar uma anterior)
+Hierarquia de acessos => admin (tem acesso a todas as salas de jogo), facilitador (pode criar salas de jogo para jogador que ele tenha acesso)
+e o jogador (pode criar salas desde que o facilitador libere a criação de salas, caso contrário fica travada a criação para o jogador, cujas salas serão automaticamente 
+compartilhadas com o facilitador). 
+Facilitador cria a sala e compartilha por e-mail com os jogadores que ficarão na mesma sala. 
+
+Se Jogador não for atrelado ao facilitador, ele consegue criar direto, sem limite de salas e iria direto para visão do admin.
+(pode ser o mesmo nível do facilitador, mas sem o direito de liberar acesso para outrps jogadores).
+
+
+
+--------------------------
+
+1- Login - OK
+2- Camada de seleção de jogo - área admin - OK
+2.2 - Camada de seleção de jogo - área Jogador
+3- Área Jogador: Camada de seleção das salas de jogo (podendo criar uma nova sala ou acessar uma anterior)
+4- Área admin: Fluxo correto de jogo
+5- Área admin: Hierarquia de acessos (admin, facilitador, jogador)
+
+

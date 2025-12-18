@@ -166,7 +166,7 @@ export default function AdminLayout({
                 </span>
               </div>
               {!isGamesPage && (
-                <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+                <div className="hidden sm:ml-6 sm:flex sm:space-x-8 sm:mr-8">
                   <Link
                     href="/admin"
                     className="inline-flex items-center px-1 pt-1 text-sm font-medium text-gray-500 hover:text-blue-600"
@@ -235,13 +235,7 @@ export default function AdminLayout({
                 </div>
               )}
             </div>
-            <div className="flex items-center gap-4">
-              {!isGamesPage && selectedGame && (
-                <div className="text-sm">
-                  <span className="text-gray-500">Jogo:</span>
-                  <span className="ml-2 font-medium text-gray-900">{selectedGame.title}</span>
-                </div>
-              )}
+            <div className="flex items-center gap-6">
               <span className="text-sm text-gray-700">
                 {finalUser?.username}
               </span>
