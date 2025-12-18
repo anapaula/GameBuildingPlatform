@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import Link from 'next/link'
-import { LogOut, Gamepad2, Settings, BarChart3, Users, BookOpen, Brain } from 'lucide-react'
+import { LogOut, Gamepad2, Settings, BarChart3, Users, BookOpen, Brain, LayoutDashboard } from 'lucide-react'
 import { useSelectedGame } from '@/hooks/useSelectedGame'
 import api from '@/lib/api'
 
@@ -31,37 +31,42 @@ export default function AdminLayout({
     }
   }, [selectedGameId])
   
-  // Listener para mudanças no localStorage (mesma aba)
+  // Listener para evento customizado de mudança de jogo (mesma aba) e storage (outras abas)
   useEffect(() => {
-    const handleStorageChange = () => {
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('selectedGameId')
-        if (stored) {
-          const gameId = parseInt(stored)
-          api.get(`/api/admin/games/${gameId}`)
-            .then((res: any) => setSelectedGame(res.data))
-            .catch(() => setSelectedGame(null))
+    const handleGameSelected = (e: Event) => {
+      const customEvent = e as CustomEvent<number | null>
+      if (customEvent.detail) {
+        api.get(`/api/admin/games/${customEvent.detail}`)
+          .then((res: any) => setSelectedGame(res.data))
+          .catch(() => setSelectedGame(null))
+      } else {
+        setSelectedGame(null)
+      }
+    }
+    
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'selectedGameId') {
+        if (e.newValue) {
+          const gameId = parseInt(e.newValue)
+          if (!isNaN(gameId)) {
+            api.get(`/api/admin/games/${gameId}`)
+              .then((res: any) => setSelectedGame(res.data))
+              .catch(() => setSelectedGame(null))
+          }
         } else {
           setSelectedGame(null)
         }
       }
     }
     
-    // Polling para detectar mudanças no localStorage (mesma aba)
-    const interval = setInterval(() => {
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('selectedGameId')
-        const currentId = stored ? parseInt(stored) : null
-        if (currentId && currentId !== selectedGameId) {
-          handleStorageChange()
-        }
-      }
-    }, 200)
+    window.addEventListener('gameSelected', handleGameSelected as EventListener)
+    window.addEventListener('storage', handleStorageChange)
     
     return () => {
-      clearInterval(interval)
+      window.removeEventListener('gameSelected', handleGameSelected as EventListener)
+      window.removeEventListener('storage', handleStorageChange)
     }
-  }, [selectedGameId])
+  }, [])
 
   useEffect(() => {
     setMounted(true)
@@ -171,6 +176,15 @@ export default function AdminLayout({
                   </Link>
                   {selectedGameId && (
                     <>
+                      <Link
+                        href="/admin/dashboard"
+                        className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${
+                          pathname === '/admin/dashboard' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <LayoutDashboard className="h-4 w-4 mr-1" />
+                        Dashboard
+                      </Link>
                       <Link
                         href="/admin/rules"
                         className={`inline-flex items-center px-1 pt-1 text-sm font-medium ${

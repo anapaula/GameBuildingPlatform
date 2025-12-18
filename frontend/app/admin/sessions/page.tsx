@@ -1,23 +1,44 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { GameSession } from '@/types'
 import { Eye, BarChart3 } from 'lucide-react'
 import Link from 'next/link'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
 
 export default function SessionsPage() {
+  const router = useRouter()
+  const { selectedGameId } = useSelectedGame()
   const [sessions, setSessions] = useState<GameSession[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) {
+      router.push('/admin')
+      return
+    }
     fetchSessions()
-  }, [])
+  }, [selectedGameId, router])
 
   const fetchSessions = async () => {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) return
+    
     try {
       const res = await api.get('/api/admin/sessions')
-      setSessions(res.data)
+      // Filtrar sessões do jogo selecionado
+      const allSessions = res.data || []
+      const gameSessions = allSessions.filter((s: GameSession) => s.game_id === gameId)
+      setSessions(gameSessions)
     } catch (error) {
       console.error('Erro ao carregar sessões:', error)
     } finally {
@@ -34,7 +55,7 @@ export default function SessionsPage() {
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Sessões de Jogo</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Visualize e analise todas as sessões de jogo
+          Visualize e analise todas as sessões de jogo do jogo selecionado
         </p>
       </div>
 

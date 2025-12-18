@@ -18,7 +18,11 @@ export default function ScenariosPage() {
   const [viewingContent, setViewingContent] = useState<{ name: string; file_content: string } | null>(null)
 
   useEffect(() => {
-    if (!selectedGameId) {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) {
       // Se não houver jogo selecionado, redirecionar para a página de jogos
       router.push('/admin')
       return
@@ -27,9 +31,13 @@ export default function ScenariosPage() {
   }, [selectedGameId, router])
 
   const fetchScenarios = async () => {
-    if (!selectedGameId) return
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) return
     try {
-      const res = await api.get(`/api/admin/scenarios?game_id=${selectedGameId}`)
+      const res = await api.get(`/api/admin/scenarios?game_id=${gameId}`)
       setScenarios(res.data)
     } catch (error) {
       toast.error('Erro ao carregar cenários')
@@ -88,7 +96,7 @@ export default function ScenariosPage() {
                     <div className="flex gap-2">
                       {scenario.file_content && (
                         <button
-                          onClick={() => setViewingContent(scenario)}
+                          onClick={() => setViewingContent({ name: scenario.name, file_content: scenario.file_content || '' })}
                           className="text-green-600 hover:text-green-900"
                           title="Ver conteúdo do arquivo"
                         >
@@ -195,6 +203,7 @@ function ScenarioModal({
   onSuccess: () => void
   onViewContent: (content: { name: string; file_content: string }) => void
 }) {
+  const { selectedGameId } = useSelectedGame()
   const [formData, setFormData] = useState({
     name: scenario?.name || '',
     description: scenario?.description || '',
@@ -277,7 +286,11 @@ function ScenarioModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      if (!selectedGameId) {
+      // Verificar também no localStorage caso o hook ainda não tenha atualizado
+      const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+      const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+      
+      if (!gameId) {
         toast.error('Jogo não selecionado')
         return
       }
@@ -285,7 +298,7 @@ function ScenarioModal({
       if (scenario) {
         // Para edição, sempre usar FormData
         const formDataToSend = new FormData()
-        formDataToSend.append('game_id', selectedGameId.toString())
+        formDataToSend.append('game_id', gameId.toString())
         formDataToSend.append('name', formData.name)
         formDataToSend.append('description', formData.description || '')
         formDataToSend.append('image_url', formData.image_url || '')
@@ -316,7 +329,7 @@ function ScenarioModal({
         // Para criação, usar FormData se houver arquivo
         if (selectedFile) {
           const formDataToSend = new FormData()
-          formDataToSend.append('game_id', selectedGameId.toString())
+          formDataToSend.append('game_id', gameId.toString())
           formDataToSend.append('name', formData.name)
           formDataToSend.append('description', formData.description || '')
           formDataToSend.append('image_url', formData.image_url || '')
@@ -337,7 +350,7 @@ function ScenarioModal({
           }
         } else {
           const formDataToSend = new FormData()
-          formDataToSend.append('game_id', selectedGameId.toString())
+          formDataToSend.append('game_id', gameId.toString())
           formDataToSend.append('name', formData.name)
           formDataToSend.append('description', formData.description || '')
           formDataToSend.append('image_url', formData.image_url || '')

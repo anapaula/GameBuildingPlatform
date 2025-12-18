@@ -17,7 +17,11 @@ export default function LLMsPage() {
   const [editingConfig, setEditingConfig] = useState<LLMConfiguration | null>(null)
 
   useEffect(() => {
-    if (!selectedGameId) {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) {
       router.push('/admin')
       return
     }
@@ -25,9 +29,13 @@ export default function LLMsPage() {
   }, [selectedGameId, router])
 
   const fetchConfigs = async () => {
-    if (!selectedGameId) return
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) return
     try {
-      const res = await api.get(`/api/admin/llm/configs?game_id=${selectedGameId}`)
+      const res = await api.get(`/api/admin/llm/configs?game_id=${gameId}`)
       setConfigs(res.data)
     } catch (error) {
       toast.error('Erro ao carregar configurações de LLM')
@@ -246,7 +254,11 @@ function LLMConfigModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedGameId) {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) {
       toast.error('Jogo não selecionado')
       return
     }
@@ -278,7 +290,7 @@ function LLMConfigModal({
         }
         toast.loading('Criando configuração...', { id: 'save-llm' })
         await api.post('/api/admin/llm/configs', {
-          game_id: selectedGameId,
+          game_id: gameId,
           ...formData,
           cost_per_token: formData.cost_per_token ? parseFloat(formData.cost_per_token) : null,
           max_tokens: formData.max_tokens ? parseInt(formData.max_tokens) : null,

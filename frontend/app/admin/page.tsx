@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import { Plus, Edit, Trash2, Image as ImageIcon, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useSelectedGame } from '@/hooks/useSelectedGame'
 
 interface Game {
   id: number
@@ -18,6 +19,7 @@ interface Game {
 
 export default function AdminGamesPage() {
   const router = useRouter()
+  const { setGameId } = useSelectedGame()
   const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -36,7 +38,7 @@ export default function AdminGamesPage() {
       
       // Se não houver jogo selecionado e houver jogos, selecionar o primeiro
       if (gamesData.length > 0 && !localStorage.getItem('selectedGameId')) {
-        localStorage.setItem('selectedGameId', gamesData[0].id.toString())
+        setGameId(gamesData[0].id)
       }
     } catch (error) {
       toast.error('Erro ao carregar jogos')
@@ -61,19 +63,37 @@ export default function AdminGamesPage() {
 
   const handleGameClick = (gameId: number) => {
     console.log('Clicou no jogo:', gameId)
-    // Salvar o jogo selecionado no localStorage
-    localStorage.setItem('selectedGameId', gameId.toString())
-    console.log('GameId salvo no localStorage:', gameId)
-    // Disparar evento customizado para atualizar o hook useSelectedGame
+    
+    // Salvar diretamente no localStorage primeiro
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('storage'))
+      localStorage.setItem('selectedGameId', gameId.toString())
+      console.log('GameId salvo no localStorage:', gameId)
+      
+      // Disparar evento customizado imediatamente
+      window.dispatchEvent(new CustomEvent('gameSelected', { detail: gameId }))
     }
-    // Aguardar um pouco para garantir que o localStorage foi atualizado
-    setTimeout(() => {
-      console.log('Redirecionando para /admin/rules')
-      // Redirecionar para as configurações do jogo (usando a primeira página de admin)
-      router.push('/admin/rules')
-    }, 100)
+    
+    // Usar o hook para atualizar o jogo selecionado
+    setGameId(gameId)
+    console.log('GameId definido via hook:', gameId)
+    
+    // Redirecionar usando window.location como fallback se router não funcionar
+    console.log('Redirecionando para /admin/dashboard')
+    try {
+      router.push('/admin/dashboard')
+      // Fallback: se após 500ms ainda estiver na mesma página, usar window.location
+      setTimeout(() => {
+        if (typeof window !== 'undefined' && window.location.pathname === '/admin') {
+          console.log('Router não funcionou, usando window.location')
+          window.location.href = '/admin/dashboard'
+        }
+      }, 500)
+    } catch (error) {
+      console.error('Erro ao redirecionar:', error)
+      if (typeof window !== 'undefined') {
+        window.location.href = '/admin/dashboard'
+      }
+    }
   }
 
   if (loading) {
@@ -186,6 +206,7 @@ export default function AdminGamesPage() {
           game={editingGame}
           games={games}
           router={router}
+          setGameId={setGameId}
           onClose={() => {
             setShowModal(false)
             setEditingGame(null)
@@ -205,12 +226,14 @@ function GameModal({
   game,
   games,
   router,
+  setGameId,
   onClose,
   onSuccess,
 }: {
   game: Game | null
   games: Game[]
   router: ReturnType<typeof useRouter>
+  setGameId: (gameId: number | null) => void
   onClose: () => void
   onSuccess: () => void
 }) {
@@ -287,11 +310,11 @@ function GameModal({
         
         // Se for o primeiro jogo ou único jogo, salvar como selecionado
         if (response.data) {
-          localStorage.setItem('selectedGameId', response.data.id.toString())
-          // Se for o primeiro jogo criado, redirecionar para as configurações
+          setGameId(response.data.id)
+          // Se for o primeiro jogo criado, redirecionar para o Dashboard
           if (games.length === 0) {
             setTimeout(() => {
-              router.push('/admin/rules')
+              router.push('/admin/dashboard')
             }, 500)
           }
         }

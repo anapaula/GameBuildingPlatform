@@ -1,58 +1,68 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+
+// Criar um evento customizado para notificar mudanças
+const GAME_SELECTED_EVENT = 'gameSelected'
 
 export function useSelectedGame() {
   const [selectedGameId, setSelectedGameId] = useState<number | null>(null)
 
+  // Carregar do localStorage na inicialização
   useEffect(() => {
-    // Carregar do localStorage
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('selectedGameId')
       if (stored) {
-        setSelectedGameId(parseInt(stored))
+        const gameId = parseInt(stored)
+        if (!isNaN(gameId)) {
+          setSelectedGameId(gameId)
+        }
       }
     }
-    
-    // Listener para mudanças no localStorage (de outros componentes)
-    const handleStorageChange = () => {
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('selectedGameId')
+  }, [])
+  
+  // Listener para mudanças no localStorage (de outras abas) e evento customizado (mesma aba)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'selectedGameId') {
+        const stored = e.newValue
         if (stored) {
-          setSelectedGameId(parseInt(stored))
+          const gameId = parseInt(stored)
+          if (!isNaN(gameId)) {
+            setSelectedGameId(gameId)
+          }
         } else {
           setSelectedGameId(null)
         }
       }
     }
     
-    window.addEventListener('storage', handleStorageChange)
+    // Listener para evento customizado (mesma aba)
+    const handleGameSelected = (e: Event) => {
+      const customEvent = e as CustomEvent<number | null>
+      setSelectedGameId(customEvent.detail)
+    }
     
-    // Polling para detectar mudanças no localStorage (mesma aba)
-    const interval = setInterval(() => {
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('selectedGameId')
-        const currentId = stored ? parseInt(stored) : null
-        if (currentId !== selectedGameId) {
-          setSelectedGameId(currentId)
-        }
-      }
-    }, 100)
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener(GAME_SELECTED_EVENT, handleGameSelected as EventListener)
     
     return () => {
       window.removeEventListener('storage', handleStorageChange)
-      clearInterval(interval)
+      window.removeEventListener(GAME_SELECTED_EVENT, handleGameSelected as EventListener)
     }
-  }, [selectedGameId])
+  }, [])
 
-  const setGameId = (gameId: number | null) => {
+  const setGameId = useCallback((gameId: number | null) => {
     setSelectedGameId(gameId)
     if (typeof window !== 'undefined') {
       if (gameId) {
         localStorage.setItem('selectedGameId', gameId.toString())
+        // Disparar evento customizado para notificar outros componentes na mesma aba
+        window.dispatchEvent(new CustomEvent(GAME_SELECTED_EVENT, { detail: gameId }))
       } else {
         localStorage.removeItem('selectedGameId')
+        window.dispatchEvent(new CustomEvent(GAME_SELECTED_EVENT, { detail: null }))
       }
     }
-  }
+  }, [])
 
   return { selectedGameId, setGameId }
 }

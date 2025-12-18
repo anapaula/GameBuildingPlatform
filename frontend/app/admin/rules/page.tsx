@@ -17,7 +17,11 @@ export default function RulesPage() {
   const [editingRule, setEditingRule] = useState<GameRule | null>(null)
 
   useEffect(() => {
-    if (!selectedGameId) {
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) {
       router.push('/admin')
       return
     }
@@ -25,9 +29,13 @@ export default function RulesPage() {
   }, [selectedGameId, router])
 
   const fetchRules = async () => {
-    if (!selectedGameId) return
+    // Verificar também no localStorage caso o hook ainda não tenha atualizado
+    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
+    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
+    
+    if (!gameId) return
     try {
-      const res = await api.get(`/api/admin/rules?game_id=${selectedGameId}`)
+      const res = await api.get(`/api/admin/rules?game_id=${gameId}`)
       setRules(res.data)
     } catch (error) {
       toast.error('Erro ao carregar regras')
