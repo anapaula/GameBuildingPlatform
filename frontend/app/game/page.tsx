@@ -52,6 +52,7 @@ interface Scenario {
   name: string
   description?: string
   image_url?: string
+  file_url?: string
   phase: number
   order: number
 }
@@ -164,16 +165,26 @@ export default function GamePage() {
       let activeSession = sessions.find((s: GameSession) => s.status === 'active')
       
       if (!activeSession) {
-        // Buscar o primeiro jogo ativo para filtrar cenários
+        // Buscar jogos disponíveis para o jogador
         let gameId = null
         try {
-          const gamesResponse = await api.get('/api/admin/games')
+          // Para jogadores, usar endpoint que filtra por acesso
+          // Para admin/facilitador, pode usar admin/games
+          const endpoint = user?.role === 'PLAYER' ? '/api/player/games' : '/api/admin/games'
+          const gamesResponse = await api.get(endpoint)
           const games = gamesResponse.data || []
           if (games.length > 0) {
-            gameId = games[0].id // Usar o primeiro jogo
+            gameId = games[0].id // Usar o primeiro jogo disponível
+          } else if (user?.role === 'PLAYER') {
+            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            return
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error('Erro ao buscar jogos:', e)
+          if (user?.role === 'PLAYER' && e.response?.status === 403) {
+            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            return
+          }
         }
 
         // Carregar cenários ordenados (filtrando por game_id se disponível)
@@ -215,16 +226,25 @@ export default function GamePage() {
   const createSession = async (scenarioId: number | null, gameId: number | null = null) => {
     setLoading(true)
     try {
-      // Se gameId não foi fornecido, buscar o primeiro jogo ativo
+      // Se gameId não foi fornecido, buscar o primeiro jogo disponível
       if (!gameId) {
         try {
-          const gamesResponse = await api.get('/api/admin/games')
+          // Para jogadores, usar endpoint que filtra por acesso
+          const endpoint = user?.role === 'PLAYER' ? '/api/player/games' : '/api/admin/games'
+          const gamesResponse = await api.get(endpoint)
           const games = gamesResponse.data || []
           if (games.length > 0) {
-            gameId = games[0].id // Usar o primeiro jogo
+            gameId = games[0].id // Usar o primeiro jogo disponível
+          } else if (user?.role === 'PLAYER') {
+            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            return
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error('Erro ao buscar jogos:', e)
+          if (user?.role === 'PLAYER' && e.response?.status === 403) {
+            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            return
+          }
         }
       }
 

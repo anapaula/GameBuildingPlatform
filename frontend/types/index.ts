@@ -2,8 +2,37 @@ export interface User {
   id: number
   username: string
   email: string
-  role: 'admin' | 'player'
+  role: 'ADMIN' | 'FACILITATOR' | 'PLAYER'
   is_active: boolean
+  created_at: string
+}
+
+export interface Invitation {
+  id: number
+  email: string
+  role: 'FACILITATOR' | 'PLAYER'
+  inviter_id: number
+  token: string
+  status: 'pending' | 'accepted' | 'expired'
+  expires_at?: string
+  accepted_at?: string
+  created_at: string
+}
+
+export interface FacilitatorPlayer {
+  id: number
+  player_id: number
+  player_username: string
+  player_email: string
+  created_at: string
+}
+
+export interface PlayerGameAccess {
+  id: number
+  player_id: number
+  game_id: number
+  game_title: string
+  granted_by: number
   created_at: string
 }
 

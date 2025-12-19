@@ -5,8 +5,9 @@ from database import Base
 import enum
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    PLAYER = "player"
+    ADMIN = "ADMIN"
+    FACILITATOR = "FACILITATOR"
+    PLAYER = "PLAYER"
 
 class LLMProvider(str, enum.Enum):
     OPENAI = "openai"
@@ -26,6 +27,11 @@ class User(Base):
     
     sessions = relationship("GameSession", back_populates="player")
     room_memberships = relationship("RoomMember", back_populates="user")
+    # Relacionamentos para facilitadores
+    facilitated_players = relationship("FacilitatorPlayer", foreign_keys="[FacilitatorPlayer.facilitator_id]", back_populates="facilitator")
+    # Relacionamentos para jogadores
+    facilitator_relation = relationship("FacilitatorPlayer", foreign_keys="[FacilitatorPlayer.player_id]", back_populates="player")
+    game_accesses = relationship("PlayerGameAccess", foreign_keys="[PlayerGameAccess.player_id]", back_populates="player")
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -190,4 +196,58 @@ class LLMTestResult(Base):
     cost = Column(Float)
     quality_score = Column(Float)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class InvitationStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    EXPIRED = "expired"
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    role = Column(SQLEnum(UserRole), nullable=False)  # facilitator ou player
+    inviter_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # admin ou facilitador que convidou
+    token = Column(String, unique=True, nullable=False, index=True)  # token único para o link de registro
+    status = Column(SQLEnum(InvitationStatus), default=InvitationStatus.PENDING)
+    expires_at = Column(DateTime(timezone=True))
+    accepted_at = Column(DateTime(timezone=True))
+    game_ids = Column(JSON)  # Lista de IDs de jogos (para jogadores)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    inviter = relationship("User", foreign_keys=[inviter_id])
+
+class InvitationGame(Base):
+    __tablename__ = "invitation_games"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    invitation_id = Column(Integer, ForeignKey("invitations.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    
+    invitation = relationship("Invitation")
+    game = relationship("Game")
+
+class FacilitatorPlayer(Base):
+    __tablename__ = "facilitator_players"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    facilitator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    facilitator = relationship("User", foreign_keys=[facilitator_id], back_populates="facilitated_players")
+    player = relationship("User", foreign_keys=[player_id], back_populates="facilitator_relation")
+
+class PlayerGameAccess(Base):
+    __tablename__ = "player_game_access"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    player_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=False)  # facilitador que concedeu acesso
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    player = relationship("User", foreign_keys=[player_id], back_populates="game_accesses")
+    game = relationship("Game")
 

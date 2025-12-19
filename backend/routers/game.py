@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import GameSession, SessionInteraction, User, GameRule, Scenario, LLMConfiguration
+from models import GameSession, SessionInteraction, User, GameRule, Scenario, LLMConfiguration, PlayerGameAccess, UserRole
 from schemas import InteractionCreate, InteractionResponse, LLMConfigResponse
 from auth import get_current_active_user
 from services.llm_service import LLMService
@@ -25,6 +25,15 @@ async def get_available_scenarios(
     current_user: User = Depends(get_current_active_user)
 ):
     """Retorna todos os cenários disponíveis para um jogo específico"""
+    # Se game_id fornecido, verificar acesso do jogador
+    if game_id and current_user.role == UserRole.PLAYER:
+        access = db.query(PlayerGameAccess).filter(
+            PlayerGameAccess.player_id == current_user.id,
+            PlayerGameAccess.game_id == game_id
+        ).first()
+        if not access:
+            raise HTTPException(status_code=403, detail="Você não tem acesso a este jogo")
+    
     query = db.query(Scenario).filter(Scenario.is_active == True)
     if game_id:
         query = query.filter(Scenario.game_id == game_id)
@@ -116,7 +125,7 @@ async def get_session_history(session_id: int, skip: int = 0, limit: int = 100, 
     session = db.query(GameSession).filter(GameSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    if current_user.role.value != "admin" and session.player_id != current_user.id:
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     interactions = db.query(SessionInteraction).filter(SessionInteraction.session_id == session_id).order_by(SessionInteraction.created_at.desc()).offset(skip).limit(limit).all()
     return interactions

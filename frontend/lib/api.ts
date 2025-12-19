@@ -35,6 +35,8 @@ api.interceptors.request.use((config) => {
     if (config.data instanceof FormData) {
       delete config.headers['Content-Type']
     }
+    // Log para debug (remover em produção)
+    console.log('API Request:', config.method?.toUpperCase(), config.baseURL + config.url)
   }
   return config
 })
@@ -42,6 +44,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Log para debug (remover em produção)
+    console.error('API Error:', {
+      message: error.message,
+      code: error.code,
+      response: error.response?.data,
+      status: error.response?.status,
+      url: error.config?.url
+    })
+    
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('auth-storage')
       window.location.href = '/login'

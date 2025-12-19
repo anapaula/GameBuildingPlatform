@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from database import get_db
-from models import GameSession, User
+from models import GameSession, User, PlayerGameAccess, UserRole
 from schemas import GameSessionCreate, GameSessionResponse
 from auth import get_current_active_user
 
@@ -14,15 +14,42 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
     active_session = db.query(GameSession).filter(GameSession.player_id == current_user.id, GameSession.status == "active").first()
     if active_session:
         return active_session
-    # Se não houver game_id, buscar o primeiro jogo ativo
+    
+    from models import Game
+    
+    # Se não houver game_id, buscar o primeiro jogo disponível para o usuário
     game_id = session_data.game_id
     if not game_id:
-        from models import Game
-        first_game = db.query(Game).filter(Game.is_active == True).order_by(Game.created_at).first()
-        if first_game:
-            game_id = first_game.id
+        # Para jogadores, buscar primeiro jogo ao qual têm acesso
+        if current_user.role == UserRole.PLAYER:
+            access = db.query(PlayerGameAccess).filter(
+                PlayerGameAccess.player_id == current_user.id
+            ).first()
+            if access:
+                game_id = access.game_id
+            else:
+                raise HTTPException(status_code=403, detail="Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.")
         else:
-            raise HTTPException(status_code=400, detail="Nenhum jogo disponível. Crie um jogo primeiro.")
+            # Admin e facilitadores podem acessar qualquer jogo
+            first_game = db.query(Game).filter(Game.is_active == True).order_by(Game.created_at).first()
+            if first_game:
+                game_id = first_game.id
+            else:
+                raise HTTPException(status_code=400, detail="Nenhum jogo disponível. Crie um jogo primeiro.")
+    else:
+        # Verificar se o jogador tem acesso ao jogo solicitado
+        if current_user.role == UserRole.PLAYER:
+            access = db.query(PlayerGameAccess).filter(
+                PlayerGameAccess.player_id == current_user.id,
+                PlayerGameAccess.game_id == game_id
+            ).first()
+            if not access:
+                raise HTTPException(status_code=403, detail="Você não tem acesso a este jogo.")
+        
+        # Verificar se o jogo existe e está ativo
+        game = db.query(Game).filter(Game.id == game_id, Game.is_active == True).first()
+        if not game:
+            raise HTTPException(status_code=404, detail="Jogo não encontrado ou inativo")
     
     db_session = GameSession(
         game_id=game_id,
@@ -40,7 +67,7 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
 
 @router.get("/", response_model=List[GameSessionResponse])
 async def list_sessions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    if current_user.role.value == "admin":
+    if current_user.role.value == "ADMIN":
         sessions = db.query(GameSession).offset(skip).limit(limit).all()
     else:
         sessions = db.query(GameSession).filter(GameSession.player_id == current_user.id).offset(skip).limit(limit).all()
@@ -51,7 +78,7 @@ async def get_session(session_id: int, db: Session = Depends(get_db), current_us
     session = db.query(GameSession).filter(GameSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    if current_user.role.value != "admin" and session.player_id != current_user.id:
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     return session
 
@@ -60,7 +87,7 @@ async def pause_session(session_id: int, db: Session = Depends(get_db), current_
     session = db.query(GameSession).filter(GameSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    if current_user.role.value != "admin" and session.player_id != current_user.id:
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     session.status = "paused"
     session.last_activity = datetime.utcnow()
@@ -72,7 +99,7 @@ async def resume_session(session_id: int, db: Session = Depends(get_db), current
     session = db.query(GameSession).filter(GameSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    if current_user.role.value != "admin" and session.player_id != current_user.id:
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     session.status = "active"
     session.last_activity = datetime.utcnow()
@@ -85,7 +112,7 @@ async def change_session_llm(session_id: int, llm_config_id: int, db: Session = 
     session = db.query(GameSession).filter(GameSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
-    if current_user.role.value != "admin" and session.player_id != current_user.id:
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
         raise HTTPException(status_code=403, detail="Acesso negado")
     
     llm_config = db.query(LLMConfiguration).filter(LLMConfiguration.id == llm_config_id).first()

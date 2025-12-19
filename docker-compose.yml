@@ -53,6 +53,8 @@ services:
       - /app/node_modules
       - /app/.next
     command: npm run dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   postgres_data:

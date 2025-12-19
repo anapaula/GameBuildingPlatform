@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from models import UserRole, LLMProvider
+from models import UserRole, LLMProvider, InvitationStatus
 
 class GameCreate(BaseModel):
     title: str
@@ -36,6 +36,13 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: Optional[UserRole] = UserRole.PLAYER
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    role: Optional[UserRole] = None
+    is_active: Optional[bool] = None
 
 class UserResponse(BaseModel):
     id: int
@@ -225,4 +232,65 @@ class LLMStats(BaseModel):
     total_cost: float
     avg_response_time: float
     success_rate: float
+
+# Schemas para sistema de convites e facilitadores
+class InvitationCreate(BaseModel):
+    email: EmailStr
+    role: UserRole  # facilitator ou player
+    game_ids: Optional[List[int]] = None  # Para jogadores: quais jogos terão acesso
+
+class InvitationResponse(BaseModel):
+    id: int
+    email: str
+    role: UserRole
+    inviter_id: int
+    token: str
+    status: InvitationStatus
+    expires_at: Optional[datetime]
+    accepted_at: Optional[datetime]
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class RegisterWithInvitation(BaseModel):
+    username: str
+    password: str
+    token: str  # token do convite
+
+class PlayerInviteCreate(BaseModel):
+    email: EmailStr
+    game_ids: List[int]  # jogos que o jogador terá acesso
+
+class PlayerInviteResponse(BaseModel):
+    id: int
+    email: str
+    facilitator_id: int
+    game_ids: List[int]
+    status: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class FacilitatorPlayerResponse(BaseModel):
+    id: int
+    player_id: int
+    player_username: str
+    player_email: str
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class PlayerGameAccessResponse(BaseModel):
+    id: int
+    player_id: int
+    game_id: int
+    game_title: str
+    granted_by: int
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
 

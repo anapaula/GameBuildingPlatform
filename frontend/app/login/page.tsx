@@ -52,8 +52,10 @@ export default function LoginPage() {
       setCheckingAuth(false)
 
       if (hasAuth && authUser) {
-        if (authUser.role === 'admin') {
+        if (authUser.role === 'ADMIN') {
           router.replace('/admin')
+        } else if (authUser.role === 'FACILITATOR') {
+          router.replace('/facilitator')
         } else {
           router.replace('/game')
         }
@@ -127,15 +129,28 @@ export default function LoginPage() {
       await new Promise(resolve => setTimeout(resolve, 300))
 
       // Redirecionar com window.location.href para reload completo
-      if (userResponse.data.role === 'admin') {
+      if (userResponse.data.role === 'ADMIN') {
         window.location.href = '/admin'
+      } else if (userResponse.data.role === 'FACILITATOR') {
+        window.location.href = '/facilitator'
       } else {
         window.location.href = '/game'
       }
     } catch (error: any) {
       console.error('Erro no login:', error)
-      toast.error(error.response?.data?.detail || error.message || 'Erro ao fazer login')
       setLoading(false)
+      
+      // Melhor tratamento de erros de rede
+      if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.message?.includes('Network Error')) {
+        toast.error('Erro de conexão. Verifique se o backend está rodando em http://localhost:8000')
+      } else if (error.response) {
+        // Erro com resposta do servidor
+        const message = error.response.data?.detail || error.response.data?.message || 'Erro ao fazer login'
+        toast.error(message)
+      } else {
+        // Outro tipo de erro
+        toast.error(error.message || 'Erro ao fazer login. Tente novamente.')
+      }
     }
   }
 

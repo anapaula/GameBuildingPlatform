@@ -89,10 +89,20 @@ async def get_current_active_user(
 async def get_current_admin_user(
     current_user: User = Depends(get_current_active_user)
 ) -> User:
-    if current_user.role.value != "admin":
+    if current_user.role.value != "ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Acesso negado. Apenas administradores podem acessar este recurso."
+        )
+    return current_user
+
+async def get_current_facilitator_user(
+    current_user: User = Depends(get_current_active_user)
+) -> User:
+    if current_user.role.value not in ["ADMIN", "FACILITATOR"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado. Apenas administradores ou facilitadores podem acessar este recurso."
         )
     return current_user
 

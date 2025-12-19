@@ -4,8 +4,9 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult
-from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats
+from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole
+from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse
+from services.email_service import EmailService
 from auth import get_current_admin_user
 from services.llm_service import LLMService
 from services.file_service import FileService
@@ -529,3 +530,116 @@ async def get_session_stats(session_id: int, db: Session = Depends(get_db), curr
 async def get_session_interactions(session_id: int, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     interactions = db.query(SessionInteraction).filter(SessionInteraction.session_id == session_id).order_by(SessionInteraction.created_at.desc()).offset(skip).limit(limit).all()
     return interactions
+
+# ========== FACILITATORS ==========
+@router.get("/facilitators", response_model=List[UserResponse])
+async def list_facilitators(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Lista todos os facilitadores"""
+    facilitators = db.query(User).filter(User.role == UserRole.FACILITATOR).offset(skip).limit(limit).all()
+    return facilitators
+
+@router.post("/facilitators/invite", response_model=InvitationResponse, status_code=201)
+async def invite_facilitator(
+    invitation_data: InvitationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Cria convite para facilitador"""
+    if invitation_data.role != UserRole.FACILITATOR:
+        raise HTTPException(status_code=400, detail="Este endpoint é apenas para convites de facilitadores")
+    
+    # Verificar se já existe usuário com este e-mail
+    existing_user = db.query(User).filter(User.email == invitation_data.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Já existe um usuário com este e-mail")
+    
+    # Verificar se já existe convite pendente
+    existing_invitation = db.query(Invitation).filter(
+        Invitation.email == invitation_data.email,
+        Invitation.status == InvitationStatus.PENDING
+    ).first()
+    if existing_invitation:
+        raise HTTPException(status_code=400, detail="Já existe um convite pendente para este e-mail")
+    
+    # Gerar token e criar convite
+    email_service = EmailService()
+    token = email_service.generate_invitation_token()
+    expires_at = email_service.get_invitation_expiry()
+    
+    invitation = Invitation(
+        email=invitation_data.email,
+        role=UserRole.FACILITATOR,
+        inviter_id=current_user.id,
+        token=token,
+        status=InvitationStatus.PENDING,
+        expires_at=expires_at
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+    
+    # Enviar e-mail (por enquanto apenas log)
+    await email_service.send_invitation_email(
+        email=invitation_data.email,
+        role="facilitator",
+        invitation_token=token,
+        inviter_name=current_user.username
+    )
+    
+    return invitation
+
+@router.get("/facilitators/invitations", response_model=List[InvitationResponse])
+async def list_facilitator_invitations(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Lista todos os convites de facilitadores"""
+    invitations = db.query(Invitation).filter(
+        Invitation.role == UserRole.FACILITATOR
+    ).order_by(Invitation.created_at.desc()).offset(skip).limit(limit).all()
+    return invitations
+
+@router.delete("/facilitators/{facilitator_id}")
+async def delete_facilitator(
+    facilitator_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Remove um facilitador"""
+    facilitator = db.query(User).filter(
+        User.id == facilitator_id,
+        User.role == UserRole.FACILITATOR
+    ).first()
+    
+    if not facilitator:
+        raise HTTPException(status_code=404, detail="Facilitador não encontrado")
+    
+    db.delete(facilitator)
+    db.commit()
+    return {"message": "Facilitador removido com sucesso"}
+
+@router.delete("/facilitators/invitations/{invitation_id}")
+async def delete_facilitator_invitation(
+    invitation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Remove um convite de facilitador"""
+    invitation = db.query(Invitation).filter(
+        Invitation.id == invitation_id,
+        Invitation.role == UserRole.FACILITATOR
+    ).first()
+    
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Convite não encontrado")
+    
+    db.delete(invitation)
+    db.commit()
+    return {"message": "Convite removido com sucesso"}
