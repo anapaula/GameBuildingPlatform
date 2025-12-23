@@ -4,12 +4,44 @@ import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { UserPlus, Lock, Mail } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
+import { useAuthStore } from '@/store/authStore'
+
+// Função auxiliar para formatar erros
+const formatError = (error: any): string => {
+  if (!error?.response?.data) {
+    return 'Erro desconhecido'
+  }
+
+  const data = error.response.data
+  
+  // Se detail é uma string, retorna diretamente
+  if (typeof data.detail === 'string') {
+    return data.detail
+  }
+  
+  // Se detail é um array (erros de validação do Pydantic)
+  if (Array.isArray(data.detail)) {
+    return data.detail.map((err: any) => {
+      if (typeof err === 'string') return err
+      if (err.msg) return `${err.loc?.join('.') || 'campo'}: ${err.msg}`
+      return JSON.stringify(err)
+    }).join(', ')
+  }
+  
+  // Se detail é um objeto
+  if (typeof data.detail === 'object') {
+    return JSON.stringify(data.detail)
+  }
+  
+  return 'Erro ao processar requisição'
+}
 
 export default function RegisterFacilitatorPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const token = searchParams.get('token')
+  const { setAuth } = useAuthStore()
   
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -21,22 +53,49 @@ export default function RegisterFacilitatorPage() {
   useEffect(() => {
     if (!token) {
       toast.error('Token de convite não fornecido')
-      router.push('/login')
+      setTimeout(() => {
+        router.push('/login')
+      }, 2000)
       return
     }
 
     fetchInvitationInfo()
-  }, [token, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token])
 
   const fetchInvitationInfo = async () => {
     try {
       const res = await api.get(`/api/auth/invitation/${token}`)
-      setInvitationInfo(res.data)
+      // Garantir que os dados sejam objetos simples
+      const data = res.data
+      const role = typeof data.role === 'string' ? data.role : String(data.role || '')
+      
+      console.log('Role recebido do backend:', role) // Debug
+      
+      // Validar que o convite é realmente para facilitador
+      if (role !== 'FACILITATOR' && role !== 'facilitator') {
+        console.error('Role inválido para facilitador:', role) // Debug
+        toast.error('Este link é apenas para registro de facilitadores')
+        setTimeout(() => {
+          router.push('/login')
+        }, 2000) // Dar tempo para o usuário ver a mensagem
+        return
+      }
+      
+      setInvitationInfo({
+        email: typeof data.email === 'string' ? data.email : String(data.email || ''),
+        role: role,
+        expires_at: data.expires_at
+      })
+      setLoading(false)
     } catch (error: any) {
       console.error('Erro ao carregar informações do convite:', error)
-      toast.error(error.response?.data?.detail || 'Token de convite inválido')
-      router.push('/login')
-    } finally {
+      const errorMessage = formatError(error)
+      toast.error(errorMessage || 'Token de convite inválido')
+      // Não redirecionar imediatamente, dar tempo para o usuário ver a mensagem
+      setTimeout(() => {
+        router.push('/login')
+      }, 2000)
       setLoading(false)
     }
   }
@@ -57,16 +116,53 @@ export default function RegisterFacilitatorPage() {
     setSubmitting(true)
     try {
       toast.loading('Criando conta...', { id: 'register' })
-      await api.post('/api/auth/register-with-invitation', {
+      
+      // Registrar o usuário
+      const registerRes = await api.post('/api/auth/register-with-invitation', {
         username,
         password,
         token
       })
+      
       toast.success('Conta criada com sucesso!', { id: 'register' })
-      router.push('/login')
+      
+      // Fazer login automático
+      try {
+        toast.loading('Fazendo login...', { id: 'login' })
+        const loginRes = await api.post('/api/auth/login', 
+          new URLSearchParams({
+            username,
+            password
+          }),
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            }
+          }
+        )
+        
+        const { access_token, user } = loginRes.data
+        
+        // Salvar autenticação
+        setAuth(user, access_token)
+        
+        toast.success('Login realizado com sucesso!', { id: 'login' })
+        
+        // Aguardar um pouco para garantir que a autenticação foi salva
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        // Redirecionar para área de facilitador usando window.location.href para garantir reload completo
+        window.location.href = '/facilitator'
+      } catch (loginError: any) {
+        console.error('Erro ao fazer login automático:', loginError)
+        // Se o login automático falhar, redirecionar para tela de login
+        toast.error('Conta criada. Por favor, faça login.', { id: 'login' })
+        router.push('/login')
+      }
     } catch (error: any) {
       console.error('Erro ao criar conta:', error)
-      toast.error(error.response?.data?.detail || 'Erro ao criar conta', { id: 'register' })
+      const errorMessage = formatError(error)
+      toast.error(errorMessage || 'Erro ao criar conta', { id: 'register' })
     } finally {
       setSubmitting(false)
     }
@@ -75,13 +171,22 @@ export default function RegisterFacilitatorPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-sm text-gray-600">Carregando informações do convite...</p>
+        </div>
       </div>
     )
   }
 
   if (!invitationInfo) {
-    return null
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-gray-600">Carregando informações do convite...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -95,7 +200,7 @@ export default function RegisterFacilitatorPage() {
             Criar Conta de Facilitador
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">
-            Convite para: <span className="font-medium">{invitationInfo.email}</span>
+            Convite para: <span className="font-medium">{invitationInfo?.email || ''}</span>
           </p>
         </div>
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
@@ -161,4 +266,3 @@ export default function RegisterFacilitatorPage() {
     </div>
   )
 }
-

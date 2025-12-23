@@ -83,6 +83,7 @@ class EmailService:
         """
         base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         
+        # token_urlsafe já gera tokens seguros para URL, não precisa codificar novamente
         if role == "facilitator" or role == "FACILITATOR":
             register_url = f"{base_url}/register/facilitator?token={invitation_token}"
             subject = "Convite para ser Facilitador - Plataforma de Jogo Online"

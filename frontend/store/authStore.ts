@@ -5,7 +5,7 @@ interface User {
   id: number
   username: string
   email: string
-  role: 'admin' | 'player'
+  role: 'ADMIN' | 'FACILITATOR' | 'PLAYER'
   is_active: boolean
 }
 

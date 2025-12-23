@@ -36,7 +36,8 @@ export default function InvitePlayerPage() {
 
   const fetchGames = async () => {
     try {
-      const res = await api.get('/api/admin/games')
+      // Usar endpoint que permite facilitadores verem todos os jogos
+      const res = await api.get('/api/player/games')
       setGames(res.data.filter((g: Game) => g.is_active))
     } catch (error) {
       console.error('Erro ao carregar jogos:', error)

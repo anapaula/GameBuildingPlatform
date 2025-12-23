@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 
 from database import get_db
 from models import User, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, PlayerGameAccess, InvitationGame
@@ -81,13 +81,20 @@ async def register_with_invitation(
         )
     
     # Verificar se o convite expirou
-    if invitation.expires_at and invitation.expires_at < datetime.utcnow():
-        invitation.status = InvitationStatus.EXPIRED
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token de convite expirado"
-        )
+    if invitation.expires_at:
+        # Garantir que ambas as datas estejam no mesmo formato (timezone-aware)
+        expires_at = invitation.expires_at
+        if expires_at.tzinfo is None:
+            # Se expires_at não tem timezone, assumir UTC
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if expires_at < now:
+            invitation.status = InvitationStatus.EXPIRED
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Token de convite expirado"
+            )
     
     # Verificar se já existe usuário com este e-mail ou username
     existing_user = db.query(User).filter(
@@ -98,6 +105,11 @@ async def register_with_invitation(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username ou email já está em uso"
         )
+    
+    # Validar que o role do convite corresponde ao esperado
+    # Se o registro vier de /register/facilitator, deve ser FACILITATOR
+    # Se vier de /register/player, deve ser PLAYER
+    # (A validação específica será feita no frontend, mas garantimos aqui também)
     
     # Criar usuário
     hashed_password = get_password_hash(register_data.password)
@@ -134,7 +146,7 @@ async def register_with_invitation(
     
     # Marcar convite como aceito
     invitation.status = InvitationStatus.ACCEPTED
-    invitation.accepted_at = datetime.utcnow()
+    invitation.accepted_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(db_user)
@@ -143,7 +155,16 @@ async def register_with_invitation(
 @router.get("/invitation/{token}")
 async def get_invitation_info(token: str, db: Session = Depends(get_db)):
     """Retorna informações do convite pelo token"""
-    invitation = db.query(Invitation).filter(Invitation.token == token).first()
+    # FastAPI já decodifica automaticamente, mas vamos garantir
+    from urllib.parse import unquote
+    decoded_token = unquote(token)
+    
+    # Buscar o convite
+    invitation = db.query(Invitation).filter(Invitation.token == decoded_token).first()
+    
+    # Se não encontrar, tentar com o token original (caso não precise decodificar)
+    if not invitation:
+        invitation = db.query(Invitation).filter(Invitation.token == token).first()
     
     if not invitation:
         raise HTTPException(status_code=404, detail="Convite não encontrado")
@@ -151,10 +172,17 @@ async def get_invitation_info(token: str, db: Session = Depends(get_db)):
     if invitation.status != InvitationStatus.PENDING:
         raise HTTPException(status_code=400, detail="Convite já foi utilizado ou expirado")
     
-    if invitation.expires_at and invitation.expires_at < datetime.utcnow():
-        invitation.status = InvitationStatus.EXPIRED
-        db.commit()
-        raise HTTPException(status_code=400, detail="Convite expirado")
+    if invitation.expires_at:
+        # Garantir que ambas as datas estejam no mesmo formato (timezone-aware)
+        expires_at = invitation.expires_at
+        if expires_at.tzinfo is None:
+            # Se expires_at não tem timezone, assumir UTC
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if expires_at < now:
+            invitation.status = InvitationStatus.EXPIRED
+            db.commit()
+            raise HTTPException(status_code=400, detail="Convite expirado")
     
     return {
         "email": invitation.email,

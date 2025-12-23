@@ -17,6 +17,8 @@ Se Jogador não for atrelado ao facilitador, ele consegue criar direto, sem limi
 2.2 - Camada de seleção de jogo - área Jogador
 3- Área Jogador: Camada de seleção das salas de jogo (podendo criar uma nova sala ou acessar uma anterior)
 4- Área admin: Fluxo correto de jogo
-5- Área admin: Hierarquia de acessos (admin, facilitador, jogador)
+5- Área admin: Hierarquia de acessos (admin, facilitador, jogador) - OK
+5.1 - Criada tela de convite de facilitador por admin -OK
+5.2 - Criar área do facilitador com opção de convite para jogador e seleção de jogo
 
 

@@ -74,6 +74,59 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     
+    # Importar modelos necessários
+    from models import (
+        GameSession, SessionInteraction, SessionScenario,
+        RoomMember, FacilitatorPlayer, PlayerGameAccess,
+        Invitation, InvitationGame, Room, GameRule
+    )
+    
+    # 1. Deletar interações de sessões do usuário
+    user_sessions = db.query(GameSession).filter(GameSession.player_id == user_id).all()
+    session_ids = [s.id for s in user_sessions]
+    
+    if session_ids:
+        # Deletar SessionInteraction
+        db.query(SessionInteraction).filter(SessionInteraction.session_id.in_(session_ids)).delete(synchronize_session=False)
+        # Deletar SessionScenario
+        db.query(SessionScenario).filter(SessionScenario.session_id.in_(session_ids)).delete(synchronize_session=False)
+        # Deletar GameSession
+        db.query(GameSession).filter(GameSession.player_id == user_id).delete(synchronize_session=False)
+    
+    # 2. Deletar RoomMember
+    db.query(RoomMember).filter(RoomMember.user_id == user_id).delete(synchronize_session=False)
+    
+    # 3. Deletar FacilitatorPlayer (tanto como facilitador quanto como jogador)
+    db.query(FacilitatorPlayer).filter(
+        (FacilitatorPlayer.facilitator_id == user_id) | (FacilitatorPlayer.player_id == user_id)
+    ).delete(synchronize_session=False)
+    
+    # 4. Deletar PlayerGameAccess (tanto como jogador quanto como granted_by)
+    db.query(PlayerGameAccess).filter(
+        (PlayerGameAccess.player_id == user_id) | (PlayerGameAccess.granted_by == user_id)
+    ).delete(synchronize_session=False)
+    
+    # 5. Deletar InvitationGame relacionados a convites do usuário
+    user_invitations = db.query(Invitation).filter(
+        (Invitation.inviter_id == user_id) | (Invitation.email == user.email)
+    ).all()
+    invitation_ids = [inv.id for inv in user_invitations]
+    
+    if invitation_ids:
+        db.query(InvitationGame).filter(InvitationGame.invitation_id.in_(invitation_ids)).delete(synchronize_session=False)
+        # Deletar Invitation
+        db.query(Invitation).filter(
+            (Invitation.inviter_id == user_id) | (Invitation.email == user.email)
+        ).delete(synchronize_session=False)
+    
+    # 6. Atualizar Rooms criados pelo usuário (setar created_by como NULL)
+    db.query(Room).filter(Room.created_by == user_id).update({"created_by": None}, synchronize_session=False)
+    
+    # 7. Atualizar GameRule criados pelo usuário (setar created_by como NULL)
+    db.query(GameRule).filter(GameRule.created_by == user_id).update({"created_by": None}, synchronize_session=False)
+    
+    # 8. Agora pode deletar o usuário
     db.delete(user)
     db.commit()
+    
     return {"message": "Usuário removido com sucesso"}
