@@ -1,50 +1,83 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
-import { GameSession } from '@/types'
-import { Eye, BarChart3 } from 'lucide-react'
-import Link from 'next/link'
-import { useSelectedGame } from '@/hooks/useSelectedGame'
+
+interface SessionInteraction {
+  id: number
+  player_input: string
+  player_input_type: string
+  ai_response: string
+  ai_response_audio_url?: string
+  llm_provider?: string
+  llm_model?: string
+  tokens_used?: number
+  cost?: number
+  response_time?: number
+  created_at: string
+}
+
+interface SessionDetails {
+  id: number
+  status: string
+  current_phase: number
+  game_id: number
+  game_title: string
+  created_at?: string
+  last_activity?: string
+  interactions: SessionInteraction[]
+}
+
+interface RoomDetails {
+  id: number
+  name: string
+  description?: string
+  max_players: number
+  created_at?: string
+  sessions: SessionDetails[]
+}
+
+interface PlayerDetails {
+  id: number
+  username: string
+  email: string
+  rooms: RoomDetails[]
+}
+
+interface FacilitatorDetails {
+  id: number
+  username: string
+  email: string
+  players: PlayerDetails[]
+}
+
+interface OverviewData {
+  facilitators: FacilitatorDetails[]
+  unassigned_players: PlayerDetails[]
+}
 
 export default function SessionsPage() {
-  const router = useRouter()
-  const { selectedGameId } = useSelectedGame()
-  const [sessions, setSessions] = useState<GameSession[]>([])
+  const [data, setData] = useState<OverviewData>({ facilitators: [], unassigned_players: [] })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Verificar também no localStorage caso o hook ainda não tenha atualizado
-    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
-    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
-    
-    if (!gameId) {
-      router.push('/admin')
-      return
-    }
-    fetchSessions()
-  }, [selectedGameId, router])
+    fetchOverview()
+  }, [])
 
-  const fetchSessions = async () => {
-    // Verificar também no localStorage caso o hook ainda não tenha atualizado
-    const storedGameId = typeof window !== 'undefined' ? localStorage.getItem('selectedGameId') : null
-    const gameId = selectedGameId || (storedGameId ? parseInt(storedGameId) : null)
-    
-    if (!gameId) return
-    
+  const fetchOverview = async () => {
     try {
-      const res = await api.get('/api/admin/sessions')
-      // Filtrar sessões do jogo selecionado
-      const allSessions = res.data || []
-      const gameSessions = allSessions.filter((s: GameSession) => s.game_id === gameId)
-      setSessions(gameSessions)
+      const res = await api.get('/api/admin/rooms/overview')
+      setData(res.data)
     } catch (error) {
-      console.error('Erro ao carregar sessões:', error)
+      console.error('Erro ao carregar visão de salas:', error)
     } finally {
       setLoading(false)
     }
   }
+
+  const getRoomCount = (player: PlayerDetails) => player.rooms.length
+  const getSessionCount = (player: PlayerDetails) =>
+    player.rooms.reduce((total, room) => total + room.sessions.length, 0)
 
   if (loading) {
     return <div className="text-center py-12">Carregando...</div>
@@ -53,60 +86,195 @@ export default function SessionsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Sessões de Jogo</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Sessões e Salas por Jogador</h1>
         <p className="mt-2 text-sm text-gray-600">
-          Visualize e analise todas as sessões de jogo do jogo selecionado
+          Visualize facilitadores, jogadores e as salas de jogos com detalhes de cada sessão.
         </p>
       </div>
 
-      <div className="bg-white shadow overflow-hidden sm:rounded-md">
-        <ul className="divide-y divide-gray-200">
-          {sessions.length === 0 ? (
-            <li className="px-4 py-5 sm:px-6">
-              <p className="text-gray-500 text-center">Nenhuma sessão encontrada.</p>
-            </li>
-          ) : (
-            sessions.map((session) => (
-              <li key={session.id}>
-                <div className="px-4 py-4 sm:px-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center">
-                        <p className="text-sm font-medium text-gray-900">
-                          Sessão #{session.id}
-                        </p>
-                        <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          session.status === 'active' 
-                            ? 'bg-green-100 text-green-800' 
-                            : session.status === 'paused'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {session.status}
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-gray-900">Facilitadores</h2>
+        {data.facilitators.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-6 text-gray-500">Nenhum facilitador encontrado.</div>
+        ) : (
+          data.facilitators.map((facilitator) => (
+            <div key={facilitator.id} className="bg-white rounded-lg shadow p-6 space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">{facilitator.username}</h3>
+                <p className="text-sm text-gray-500">{facilitator.email}</p>
+              </div>
+
+              {facilitator.players.length === 0 ? (
+                <div className="text-sm text-gray-500">Nenhum jogador associado.</div>
+              ) : (
+                facilitator.players.map((player) => (
+                  <details key={player.id} className="border rounded-lg p-4">
+                    <summary className="cursor-pointer">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-gray-900">{player.username}</span>
+                        <span className="text-xs text-gray-500">{player.email}</span>
+                        <span className="text-xs text-gray-500 mt-1">
+                          Salas: {getRoomCount(player)} • Sessões: {getSessionCount(player)}
                         </span>
                       </div>
-                      <p className="mt-1 text-sm text-gray-500">
-                        Player ID: {session.player_id} | Fase: {session.current_phase}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-400">
-                        Criada em: {new Date(session.created_at).toLocaleString('pt-BR')}
-                      </p>
+                    </summary>
+                    <div className="mt-4 space-y-4">
+                      {player.rooms.length === 0 ? (
+                        <div className="text-sm text-gray-500">Nenhuma sala encontrada.</div>
+                      ) : (
+                        player.rooms.map((room) => (
+                          <div key={room.id} className="border rounded-md p-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-gray-900">{room.name}</p>
+                                {room.description && (
+                                  <p className="text-xs text-gray-500">{room.description}</p>
+                                )}
+                              </div>
+                              <span className="text-xs text-gray-500">Máx: {room.max_players}</span>
+                            </div>
+
+                            <div className="mt-3 space-y-3">
+                              {room.sessions.length === 0 ? (
+                                <div className="text-sm text-gray-500">Nenhuma sessão nesta sala.</div>
+                              ) : (
+                                room.sessions.map((session) => (
+                                  <details key={session.id} className="bg-gray-50 rounded p-3">
+                                    <summary className="cursor-pointer">
+                                      <div className="flex items-center justify-between">
+                                        <div>
+                                          <span className="font-medium text-gray-900">
+                                            {session.game_title} • Sessão #{session.id}
+                                          </span>
+                                          <div className="text-xs text-gray-500">
+                                            Fase {session.current_phase} • {session.status}
+                                          </div>
+                                        </div>
+                                        <span className="text-xs text-gray-500">
+                                          {session.created_at ? new Date(session.created_at).toLocaleString('pt-BR') : ''}
+                                        </span>
+                                      </div>
+                                    </summary>
+                                    <div className="mt-3 space-y-2">
+                                      {session.interactions.length === 0 ? (
+                                        <div className="text-xs text-gray-500">Sem interações.</div>
+                                      ) : (
+                                        session.interactions.map((interaction) => (
+                                          <div key={interaction.id} className="bg-white border rounded p-2 text-xs">
+                                            <div className="text-gray-500">
+                                              {new Date(interaction.created_at).toLocaleString('pt-BR')}
+                                            </div>
+                                            <div className="mt-1">
+                                              <span className="font-medium">Jogador:</span> {interaction.player_input}
+                                            </div>
+                                            <div className="mt-1">
+                                              <span className="font-medium">Sistema:</span> {interaction.ai_response}
+                                            </div>
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  </details>
+                                ))
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
-                    <div className="flex gap-2">
-                      <Link
-                        href={`/admin/sessions/${session.id}`}
-                        className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        Ver Detalhes
-                      </Link>
-                    </div>
-                  </div>
+                  </details>
+                ))
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-gray-900">Jogadores sem Facilitador</h2>
+        {data.unassigned_players.length === 0 ? (
+          <div className="bg-white rounded-lg shadow p-6 text-gray-500">
+            Nenhum jogador sem facilitador.
+          </div>
+        ) : (
+          data.unassigned_players.map((player) => (
+            <details key={player.id} className="bg-white rounded-lg shadow p-6">
+              <summary className="cursor-pointer">
+                <div className="flex flex-col">
+                  <span className="font-medium text-gray-900">{player.username}</span>
+                  <span className="text-xs text-gray-500">{player.email}</span>
+                  <span className="text-xs text-gray-500 mt-1">
+                    Salas: {getRoomCount(player)} • Sessões: {getSessionCount(player)}
+                  </span>
                 </div>
-              </li>
-            ))
-          )}
-        </ul>
+              </summary>
+              <div className="mt-4 space-y-4">
+                {player.rooms.length === 0 ? (
+                  <div className="text-sm text-gray-500">Nenhuma sala encontrada.</div>
+                ) : (
+                  player.rooms.map((room) => (
+                    <div key={room.id} className="border rounded-md p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-gray-900">{room.name}</p>
+                          {room.description && (
+                            <p className="text-xs text-gray-500">{room.description}</p>
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-500">Máx: {room.max_players}</span>
+                      </div>
+
+                      <div className="mt-3 space-y-3">
+                        {room.sessions.length === 0 ? (
+                          <div className="text-sm text-gray-500">Nenhuma sessão nesta sala.</div>
+                        ) : (
+                          room.sessions.map((session) => (
+                            <details key={session.id} className="bg-gray-50 rounded p-3">
+                              <summary className="cursor-pointer">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <span className="font-medium text-gray-900">
+                                      {session.game_title} • Sessão #{session.id}
+                                    </span>
+                                    <div className="text-xs text-gray-500">
+                                      Fase {session.current_phase} • {session.status}
+                                    </div>
+                                  </div>
+                                  <span className="text-xs text-gray-500">
+                                    {session.created_at ? new Date(session.created_at).toLocaleString('pt-BR') : ''}
+                                  </span>
+                                </div>
+                              </summary>
+                              <div className="mt-3 space-y-2">
+                                {session.interactions.length === 0 ? (
+                                  <div className="text-xs text-gray-500">Sem interações.</div>
+                                ) : (
+                                  session.interactions.map((interaction) => (
+                                    <div key={interaction.id} className="bg-white border rounded p-2 text-xs">
+                                      <div className="text-gray-500">
+                                        {new Date(interaction.created_at).toLocaleString('pt-BR')}
+                                      </div>
+                                      <div className="mt-1">
+                                        <span className="font-medium">Jogador:</span> {interaction.player_input}
+                                      </div>
+                                      <div className="mt-1">
+                                        <span className="font-medium">Sistema:</span> {interaction.ai_response}
+                                      </div>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </details>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </details>
+          ))
+        )}
       </div>
     </div>
   )

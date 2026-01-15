@@ -89,6 +89,7 @@ export interface LLMConfiguration {
 
 export interface GameSession {
   id: number
+  game_id: number
   player_id: number
   room_id?: number
   current_scenario_id?: number
@@ -138,13 +139,16 @@ export interface PlayerRoom {
     current_phase: number
     created_at: string
     last_activity?: string
+    interaction_count?: number
   }>
   has_active_session: boolean
+  has_chat?: boolean
   latest_session?: {
     id: number
     status: string
     current_phase: number
     created_at: string
     last_activity?: string
+    interaction_count?: number
   }
 }

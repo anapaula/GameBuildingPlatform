@@ -11,7 +11,20 @@ router = APIRouter()
 
 @router.post("/", response_model=GameSessionResponse, status_code=201)
 async def create_session(session_data: GameSessionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    active_session = db.query(GameSession).filter(GameSession.player_id == current_user.id, GameSession.status == "active").first()
+    active_session_query = db.query(GameSession).filter(
+        GameSession.player_id == current_user.id,
+        GameSession.status == "active"
+    )
+
+    if session_data.room_id is not None:
+        active_session_query = active_session_query.filter(GameSession.room_id == session_data.room_id)
+    else:
+        active_session_query = active_session_query.filter(GameSession.room_id.is_(None))
+
+    if session_data.game_id is not None:
+        active_session_query = active_session_query.filter(GameSession.game_id == session_data.game_id)
+
+    active_session = active_session_query.first()
     if active_session:
         return active_session
     

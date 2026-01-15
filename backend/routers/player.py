@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
-from models import User, Game, PlayerGameAccess, UserRole, Room, RoomMember, GameSession
+from models import User, Game, PlayerGameAccess, UserRole, Room, RoomMember, GameSession, SessionInteraction
 from schemas import GameResponse, RoomResponse
 from auth import get_current_active_user
 
@@ -134,6 +134,23 @@ async def get_player_rooms_by_game(
         members = db.query(RoomMember).filter(RoomMember.room_id == room.id).all()
         member_count = len(members)
         
+        session_info = []
+        for session in sessions:
+            interaction_count = db.query(SessionInteraction).filter(
+                SessionInteraction.session_id == session.id
+            ).count()
+            session_info.append({
+                "id": session.id,
+                "status": session.status,
+                "current_phase": session.current_phase,
+                "created_at": session.created_at.isoformat(),
+                "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                "interaction_count": interaction_count
+            })
+
+        chat_sessions = [s for s in session_info if s["interaction_count"] > 0]
+        has_chat = len(chat_sessions) > 0
+
         result.append({
             "id": room.id,
             "name": room.name,
@@ -142,24 +159,17 @@ async def get_player_rooms_by_game(
             "is_active": room.is_active,
             "created_at": room.created_at.isoformat(),
             "member_count": member_count,
-            "sessions": [
-                {
-                    "id": session.id,
-                    "status": session.status,
-                    "current_phase": session.current_phase,
-                    "created_at": session.created_at.isoformat(),
-                    "last_activity": session.last_activity.isoformat() if session.last_activity else None
-                }
-                for session in sessions
-            ],
+            "sessions": chat_sessions,
             "has_active_session": any(s.status == "active" for s in sessions),
+            "has_chat": has_chat,
             "latest_session": {
-                "id": sessions[0].id,
-                "status": sessions[0].status,
-                "current_phase": sessions[0].current_phase,
-                "created_at": sessions[0].created_at.isoformat(),
-                "last_activity": sessions[0].last_activity.isoformat() if sessions[0].last_activity else None
-            } if sessions else None
+                "id": chat_sessions[0]["id"],
+                "status": chat_sessions[0]["status"],
+                "current_phase": chat_sessions[0]["current_phase"],
+                "created_at": chat_sessions[0]["created_at"],
+                "last_activity": chat_sessions[0]["last_activity"],
+                "interaction_count": chat_sessions[0]["interaction_count"]
+            } if chat_sessions else None
         })
     
     return result

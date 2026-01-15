@@ -144,7 +144,7 @@ export default function PlayerRoomsPage() {
         <div className="flex justify-between items-center mb-8">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push('/player/games')}
+              onClick={() => router.push('/player')}
               className="p-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -244,7 +244,12 @@ export default function PlayerRoomsPage() {
                 )}
 
                 <div className="flex gap-2">
-                  {room.has_active_session && room.latest_session ? (
+                  {(() => {
+                    const hasChat = room.has_chat ?? room.sessions.some(
+                      (session) => (session.interaction_count ?? 0) > 0
+                    )
+                    return hasChat && room.latest_session
+                  })() ? (
                     <button
                       onClick={() => handleContinueSession(room.id, room.latest_session!.id)}
                       className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-sm font-semibold"
@@ -288,7 +293,7 @@ export default function PlayerRoomsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
                     Descrição (opcional)
                   </label>
                   <textarea
@@ -328,5 +333,4 @@ export default function PlayerRoomsPage() {
     </div>
   )
 }
-
 

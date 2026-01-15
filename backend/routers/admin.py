@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole
+from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember
 from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse
 from services.email_service import EmailService
 from auth import get_current_admin_user
@@ -530,6 +530,119 @@ async def get_session_stats(session_id: int, db: Session = Depends(get_db), curr
 async def get_session_interactions(session_id: int, skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     interactions = db.query(SessionInteraction).filter(SessionInteraction.session_id == session_id).order_by(SessionInteraction.created_at.desc()).offset(skip).limit(limit).all()
     return interactions
+
+@router.get("/rooms/overview")
+async def get_rooms_overview(db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
+    """Retorna visão hierárquica: facilitadores -> jogadores -> salas -> sessões -> interações."""
+    facilitator_links = db.query(FacilitatorPlayer).all()
+    players_by_facilitator = {}
+    assigned_player_ids = set()
+
+    for link in facilitator_links:
+        assigned_player_ids.add(link.player_id)
+        players_by_facilitator.setdefault(link.facilitator_id, set()).add(link.player_id)
+
+    facilitators = db.query(User).filter(User.role == UserRole.FACILITATOR).all()
+
+    def build_room_details(player_id: int):
+        room_memberships = db.query(RoomMember).filter(RoomMember.user_id == player_id).all()
+        room_ids = list({rm.room_id for rm in room_memberships})
+        if not room_ids:
+            return []
+
+        rooms = db.query(Room).filter(Room.id.in_(room_ids), Room.is_active == True).all()
+        room_details = []
+        for room in rooms:
+            sessions = db.query(GameSession).filter(
+                GameSession.room_id == room.id,
+                GameSession.player_id == player_id
+            ).order_by(GameSession.created_at.desc()).all()
+
+            session_details = []
+            for session in sessions:
+                game = db.query(Game).filter(Game.id == session.game_id).first()
+                interactions = db.query(SessionInteraction).filter(
+                    SessionInteraction.session_id == session.id
+                ).order_by(SessionInteraction.created_at.asc()).all()
+
+                interaction_list = []
+                for interaction in interactions:
+                    interaction_list.append({
+                        "id": interaction.id,
+                        "player_input": interaction.player_input,
+                        "player_input_type": interaction.player_input_type,
+                        "ai_response": interaction.ai_response,
+                        "ai_response_audio_url": interaction.ai_response_audio_url,
+                        "llm_provider": interaction.llm_provider,
+                        "llm_model": interaction.llm_model,
+                        "tokens_used": interaction.tokens_used,
+                        "cost": interaction.cost,
+                        "response_time": interaction.response_time,
+                        "created_at": interaction.created_at.isoformat() if interaction.created_at else None
+                    })
+
+                session_details.append({
+                    "id": session.id,
+                    "status": session.status,
+                    "current_phase": session.current_phase,
+                    "game_id": session.game_id,
+                    "game_title": game.title if game else "Jogo desconhecido",
+                    "created_at": session.created_at.isoformat() if session.created_at else None,
+                    "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                    "interactions": interaction_list
+                })
+
+            room_details.append({
+                "id": room.id,
+                "name": room.name,
+                "description": room.description,
+                "max_players": room.max_players,
+                "created_at": room.created_at.isoformat() if room.created_at else None,
+                "sessions": session_details
+            })
+
+        return room_details
+
+    facilitator_data = []
+    for facilitator in facilitators:
+        player_ids = list(players_by_facilitator.get(facilitator.id, set()))
+        players = []
+        for player_id in player_ids:
+            player = db.query(User).filter(User.id == player_id).first()
+            if not player:
+                continue
+            players.append({
+                "id": player.id,
+                "username": player.username,
+                "email": player.email,
+                "rooms": build_room_details(player.id)
+            })
+
+        facilitator_data.append({
+            "id": facilitator.id,
+            "username": facilitator.username,
+            "email": facilitator.email,
+            "players": players
+        })
+
+    unassigned_players = db.query(User).filter(
+        User.role == UserRole.PLAYER,
+        ~User.id.in_(assigned_player_ids)
+    ).all()
+
+    unassigned_data = []
+    for player in unassigned_players:
+        unassigned_data.append({
+            "id": player.id,
+            "username": player.username,
+            "email": player.email,
+            "rooms": build_room_details(player.id)
+        })
+
+    return {
+        "facilitators": facilitator_data,
+        "unassigned_players": unassigned_data
+    }
 
 # ========== FACILITATORS ==========
 @router.get("/facilitators", response_model=List[UserResponse])

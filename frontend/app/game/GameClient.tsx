@@ -24,6 +24,7 @@ import {
 
 interface GameSession {
   id: number
+  game_id: number
   player_id: number
   room_id?: number
   current_scenario_id?: number
@@ -85,7 +86,7 @@ function GameClient() {
   const [includeAudio, setIncludeAudio] = useState(false)
   const [activeAudio, setActiveAudio] = useState<HTMLAudioElement | null>(null)
   
-  // Estado para seleÃ§Ã£o de sessÃ£o
+  // Estado para seleção de sessão
   const [sessions, setSessions] = useState<GameSession[]>([])
   const [llmConfigs, setLlmConfigs] = useState<LLMConfig[]>([])
   const [scenarios, setScenarios] = useState<Scenario[]>([])
@@ -100,7 +101,7 @@ function GameClient() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
 
-  // VerificaÃ§Ã£o de autenticaÃ§Ã£o
+  // Verificação de autenticação
   useEffect(() => {
     if (!_hasHydrated) return
 
@@ -153,7 +154,7 @@ function GameClient() {
     return () => clearTimeout(checkTimer)
   }, [_hasHydrated, isAuthenticated, token, user, router])
 
-  // Carregar seleÃ§Ã£o de sessÃ£o
+  // Carregar seleção de sessão
   const loadSessionSelection = async () => {
     setLoadingConfigs(true)
     try {
@@ -177,8 +178,8 @@ function GameClient() {
         setViewMode('select')
       }
     } catch (error: any) {
-      console.error('Erro ao carregar seleÃ§Ã£o:', error)
-      toast.error('Erro ao carregar configuraÃ§Ãµes')
+      console.error('Erro ao carregar seleção:', error)
+      toast.error('Erro ao carregar configurações')
       setViewMode('select')
     } finally {
       setLoadingConfigs(false)
@@ -221,19 +222,19 @@ function GameClient() {
       const newSession = createResponse.data
       setSession(newSession)
       setViewMode('game')
-      toast.success(useTestMode ? 'Ambiente de teste iniciado!' : 'SessÃ£o criada com sucesso!')
+      toast.success(useTestMode ? 'Ambiente de teste iniciado!' : 'Sessão criada com sucesso!')
       
       if (selectedScenario) {
         const scenario = scenarios.find((s: Scenario) => s.id === selectedScenario)
         if (scenario && scenario.description) {
           setTimeout(() => {
-            toast.info(\CenÃ¡rio: \\)
+            toast.info(`Cenário: ${scenario.name}`)
           }, 500)
         }
       }
     } catch (error: any) {
-      console.error('Erro ao criar sessÃ£o:', error)
-      toast.error(error.response?.data?.detail || 'Erro ao criar sessÃ£o')
+      console.error('Erro ao criar sessão:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao criar sessão')
     } finally {
       setLoading(false)
     }
@@ -253,10 +254,10 @@ function GameClient() {
       setSession(targetSession)
       setViewMode('game')
       await loadHistory(sessionId)
-      toast.success('SessÃ£o retomada!')
+      toast.success('Sessão retomada!')
     } catch (error: any) {
-      console.error('Erro ao continuar sessÃ£o:', error)
-      toast.error('Erro ao continuar sessÃ£o')
+      console.error('Erro ao continuar sessão:', error)
+      toast.error('Erro ao continuar sessão')
     } finally {
       setLoading(false)
     }
@@ -268,7 +269,7 @@ function GameClient() {
       const history = response.data || []
       setInteractions(history)
     } catch (error: any) {
-      console.error('Erro ao carregar histÃ³rico:', error)
+      console.error('Erro ao carregar histórico:', error)
     }
   }
 
@@ -341,7 +342,7 @@ function GameClient() {
       setIsRecording(true)
       toast.success('Gravando...')
     } catch (error) {
-      console.error('Erro ao iniciar gravaÃ§Ã£o:', error)
+      console.error('Erro ao iniciar gravação:', error)
       toast.error('Erro ao acessar microfone')
     }
   }
@@ -372,10 +373,10 @@ function GameClient() {
       const newInteraction = response.data
       setInteractions(prev => [...prev, newInteraction])
       
-      toast.success('Ãudio processado!')
+      toast.success('Áudio processado!')
     } catch (error: any) {
-      console.error('Erro ao enviar Ã¡udio:', error)
-      toast.error(error.response?.data?.detail || 'Erro ao processar Ã¡udio')
+      console.error('Erro ao enviar áudio:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao processar áudio')
     } finally {
       setLoading(false)
     }
@@ -406,7 +407,7 @@ function GameClient() {
       setSession({ ...session, status: 'paused' })
       setViewMode('select')
     } catch (error: any) {
-      console.error('Erro ao pausar sessÃ£o:', error)
+      console.error('Erro ao pausar sessão:', error)
       toast.error('Erro ao salvar progresso')
     }
   }

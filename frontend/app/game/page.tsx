@@ -482,6 +482,29 @@ function GamePageContent() {
     router.push('/login')
   }
 
+  const handleBackToRooms = async () => {
+    let gameId = session?.game_id || (urlGameId ? parseInt(urlGameId) : null)
+
+    if (!gameId) {
+      try {
+        const gamesResponse = await api.get('/api/player/games')
+        const games = gamesResponse.data || []
+        if (games.length > 0) {
+          gameId = games[0].id
+        } else {
+          router.push('/player')
+          return
+        }
+      } catch (error) {
+        console.error('Erro ao buscar jogos:', error)
+        router.push('/player')
+        return
+      }
+    }
+
+    router.push(`/player/games/${gameId}/rooms`)
+  }
+
   if (!_hasHydrated || !authChecked) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
@@ -562,30 +585,7 @@ function GamePageContent() {
           <div className="flex items-center gap-2">
             {finalUser?.role === 'PLAYER' && (
               <button
-                onClick={async () => {
-                  let gameId = session?.game_id || (urlGameId ? parseInt(urlGameId) : null)
-                  
-                  // Se não houver gameId, buscar o primeiro jogo disponível
-                  if (!gameId) {
-                    try {
-                      const gamesResponse = await api.get('/api/player/games')
-                      const games = gamesResponse.data || []
-                      if (games.length > 0) {
-                        gameId = games[0].id
-                      } else {
-                        // Se não houver jogos, voltar para a lista de jogos
-                        router.push('/player')
-                        return
-                      }
-                    } catch (error) {
-                      console.error('Erro ao buscar jogos:', error)
-                      router.push('/player')
-                      return
-                    }
-                  }
-                  
-                  router.push(`/player/games/${gameId}/rooms`)
-                }}
+                onClick={handleBackToRooms}
                 className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors flex items-center gap-2"
                 title="Voltar para salas"
               >
@@ -634,7 +634,7 @@ function GamePageContent() {
                     <div className="bg-blue-500 text-white rounded-lg px-4 py-2 max-w-md">
                       <p className="text-sm">{interaction.player_input}</p>
                       {interaction.player_input_type === 'audio' && (
-                        <p className="text-xs opacity-75 mt-1">🎤 Mensagem de voz</p>
+                        <p className="text-xs opacity-75 mt-1">Mensagem de voz</p>
                       )}
                     </div>
                   </div>
@@ -685,7 +685,7 @@ function GamePageContent() {
 
         {/* Área de Input */}
         <div className="bg-white/95 backdrop-blur-md rounded-lg shadow-xl p-4">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center justify-between gap-2 mb-2">
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -695,6 +695,16 @@ function GamePageContent() {
               />
               Incluir áudio na resposta
             </label>
+            {finalUser?.role === 'PLAYER' && (
+              <button
+                onClick={handleBackToRooms}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm flex items-center gap-2"
+                title="Voltar para salas"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Voltar para Salas
+              </button>
+            )}
           </div>
           
           <div className="flex items-center gap-2">
