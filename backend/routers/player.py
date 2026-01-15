@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from database import get_db
-from models import User, Game, PlayerGameAccess, UserRole
-from schemas import GameResponse
+from models import User, Game, PlayerGameAccess, UserRole, Room, RoomMember, GameSession
+from schemas import GameResponse, RoomResponse
 from auth import get_current_active_user
 
 router = APIRouter()
@@ -26,8 +26,55 @@ async def get_available_games(
     
     game_ids = [access.game_id for access in accesses]
     
+    # Se o jogador não tem acesso a nenhum jogo, verificar se há jogos ativos
+    # e dar acesso automático a todos os jogos ativos
     if not game_ids:
-        return []
+        # Buscar todos os jogos ativos
+        all_active_games = db.query(Game).filter(Game.is_active == True).all()
+        
+        if all_active_games:
+            # Buscar um admin ou facilitador para usar como granted_by
+            # Priorizar admin, depois facilitador
+            admin_user = db.query(User).filter(
+                User.role == UserRole.ADMIN,
+                User.is_active == True
+            ).first()
+            
+            if not admin_user:
+                admin_user = db.query(User).filter(
+                    User.role == UserRole.FACILITATOR,
+                    User.is_active == True
+                ).first()
+            
+            # Se não houver admin ou facilitador, usar o próprio jogador
+            granted_by_id = admin_user.id if admin_user else current_user.id
+            
+            # Criar acessos automáticos para todos os jogos ativos
+            for game in all_active_games:
+                # Verificar se já existe acesso (evitar duplicatas)
+                existing_access = db.query(PlayerGameAccess).filter(
+                    PlayerGameAccess.player_id == current_user.id,
+                    PlayerGameAccess.game_id == game.id
+                ).first()
+                
+                if not existing_access:
+                    new_access = PlayerGameAccess(
+                        player_id=current_user.id,
+                        game_id=game.id,
+                        granted_by=granted_by_id
+                    )
+                    db.add(new_access)
+            
+            db.commit()
+            
+            # Buscar novamente os acessos após criar
+            accesses = db.query(PlayerGameAccess).filter(
+                PlayerGameAccess.player_id == current_user.id
+            ).all()
+            game_ids = [access.game_id for access in accesses]
+        else:
+            # Não há jogos ativos no sistema
+            return []
     
     games = db.query(Game).filter(
         Game.id.in_(game_ids),
@@ -35,4 +82,89 @@ async def get_available_games(
     ).all()
     
     return games
+
+@router.get("/games/{game_id}/rooms", response_model=List[dict])
+async def get_player_rooms_by_game(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retorna todas as salas do jogador para um jogo específico"""
+    # Verificar se o jogador tem acesso ao jogo
+    if current_user.role == UserRole.PLAYER:
+        access = db.query(PlayerGameAccess).filter(
+            PlayerGameAccess.player_id == current_user.id,
+            PlayerGameAccess.game_id == game_id
+        ).first()
+        if not access:
+            raise HTTPException(status_code=403, detail="Você não tem acesso a este jogo")
+    
+    # Verificar se o jogo existe e está ativo
+    game = db.query(Game).filter(Game.id == game_id, Game.is_active == True).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado ou inativo")
+    
+    # Buscar todas as salas onde o jogador é membro e que têm sessões deste jogo
+    room_members = db.query(RoomMember).filter(
+        RoomMember.user_id == current_user.id
+    ).all()
+    
+    room_ids = [rm.room_id for rm in room_members]
+    
+    if not room_ids:
+        return []
+    
+    # Buscar salas ativas
+    rooms = db.query(Room).filter(
+        Room.id.in_(room_ids),
+        Room.is_active == True
+    ).all()
+    
+    # Para cada sala, buscar sessões do jogador neste jogo
+    result = []
+    for room in rooms:
+        # Buscar sessões do jogador nesta sala e neste jogo
+        sessions = db.query(GameSession).filter(
+            GameSession.room_id == room.id,
+            GameSession.game_id == game_id,
+            GameSession.player_id == current_user.id
+        ).order_by(GameSession.created_at.desc()).all()
+        
+        # Buscar informações dos membros da sala
+        members = db.query(RoomMember).filter(RoomMember.room_id == room.id).all()
+        member_count = len(members)
+        
+        result.append({
+            "id": room.id,
+            "name": room.name,
+            "description": room.description,
+            "max_players": room.max_players,
+            "is_active": room.is_active,
+            "created_at": room.created_at.isoformat(),
+            "member_count": member_count,
+            "sessions": [
+                {
+                    "id": session.id,
+                    "status": session.status,
+                    "current_phase": session.current_phase,
+                    "created_at": session.created_at.isoformat(),
+                    "last_activity": session.last_activity.isoformat() if session.last_activity else None
+                }
+                for session in sessions
+            ],
+            "has_active_session": any(s.status == "active" for s in sessions),
+            "latest_session": {
+                "id": sessions[0].id,
+                "status": sessions[0].status,
+                "current_phase": sessions[0].current_phase,
+                "created_at": sessions[0].created_at.isoformat(),
+                "last_activity": sessions[0].last_activity.isoformat() if sessions[0].last_activity else None
+            } if sessions else None
+        })
+    
+    return result
+
+
+
+
 

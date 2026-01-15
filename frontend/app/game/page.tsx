@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useRef, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -16,11 +16,13 @@ import {
   Pause,
   History,
   Settings,
-  LogOut
+  LogOut,
+  ArrowLeft
 } from 'lucide-react'
 
 interface GameSession {
   id: number
+  game_id: number
   player_id: number
   room_id?: number
   current_scenario_id?: number
@@ -57,11 +59,17 @@ interface Scenario {
   order: number
 }
 
-export default function GamePage() {
+function GamePageContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, isAuthenticated, token, _hasHydrated, logout } = useAuthStore()
   const [authChecked, setAuthChecked] = useState(false)
   const [canRender, setCanRender] = useState(false)
+  
+  // Parâmetros da URL
+  const urlRoomId = searchParams.get('roomId')
+  const urlGameId = searchParams.get('gameId')
+  const urlSessionId = searchParams.get('sessionId')
   
   // Estado do jogo
   const [session, setSession] = useState<GameSession | null>(null)
@@ -158,36 +166,67 @@ export default function GamePage() {
   const initializeGame = async () => {
     setInitializing(true)
     try {
+      // Se há sessionId na URL, carregar essa sessão diretamente
+      if (urlSessionId) {
+        try {
+          const sessionResponse = await api.get(`/api/sessions/${urlSessionId}`)
+          const session = sessionResponse.data
+          setSession(session)
+          await loadHistory(session.id)
+          return
+        } catch (error: any) {
+          console.error('Erro ao carregar sessão:', error)
+          toast.error('Erro ao carregar sessão. Redirecionando...')
+          router.push('/player/games')
+          return
+        }
+      }
+
       // Verificar se há sessão ativa
       const sessionsResponse = await api.get('/api/sessions/')
       const sessions = sessionsResponse.data || []
       
-      let activeSession = sessions.find((s: GameSession) => s.status === 'active')
+      // Se há roomId na URL, filtrar sessões por sala
+      let activeSession = null
+      if (urlRoomId) {
+        const roomId = parseInt(urlRoomId)
+        activeSession = sessions.find((s: GameSession) => 
+          s.status === 'active' && s.room_id === roomId
+        )
+      } else {
+        activeSession = sessions.find((s: GameSession) => s.status === 'active')
+      }
       
       if (!activeSession) {
         // Buscar jogos disponíveis para o jogador
-        let gameId = null
-        try {
-          // Para jogadores, usar endpoint que filtra por acesso
-          // Para admin/facilitador, pode usar admin/games
-          const endpoint = user?.role === 'PLAYER' ? '/api/player/games' : '/api/admin/games'
-          const gamesResponse = await api.get(endpoint)
-          const games = gamesResponse.data || []
-          if (games.length > 0) {
-            gameId = games[0].id // Usar o primeiro jogo disponível
-          } else if (user?.role === 'PLAYER') {
-            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
-            return
-          }
-        } catch (e: any) {
-          console.error('Erro ao buscar jogos:', e)
-          if (user?.role === 'PLAYER' && e.response?.status === 403) {
-            toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
-            return
+        let gameId = urlGameId ? parseInt(urlGameId) : null
+        let roomId = urlRoomId ? parseInt(urlRoomId) : null
+        
+        if (!gameId) {
+          try {
+            // Para jogadores, usar endpoint que filtra por acesso
+            // Para admin/facilitador, pode usar admin/games
+            const endpoint = user?.role === 'PLAYER' ? '/api/player/games' : '/api/admin/games'
+            const gamesResponse = await api.get(endpoint)
+            const games = gamesResponse.data || []
+            if (games.length > 0) {
+              gameId = games[0].id // Usar o primeiro jogo disponível
+            } else if (user?.role === 'PLAYER') {
+              toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+              router.push('/player/games')
+              return
+            }
+          } catch (e: any) {
+            console.error('Erro ao buscar jogos:', e)
+            if (user?.role === 'PLAYER' && e.response?.status === 403) {
+              toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+              router.push('/player/games')
+              return
+            }
           }
         }
 
-        // Carregar cenários ordenados (filtrando por game_id se disponível)
+        // Carregar cenários ordenados (filtrando por game_id)
         const loadedScenarios = await loadScenarios(gameId)
         
         // Encontrar o cenário de introdução (que contém "Introdução" no nome do arquivo)
@@ -202,10 +241,10 @@ export default function GamePage() {
           ) || loadedScenarios[0] // Se não encontrar, usa o primeiro (que deve ser o de menor order)
         
           // Criar sessão com o cenário de introdução
-          await createSession(introScenario?.id || null, gameId)
+          await createSession(introScenario?.id || null, gameId, roomId)
         } else {
           // Se não houver cenários, criar sessão sem cenário
-          await createSession(null, gameId)
+          await createSession(null, gameId, roomId)
         }
         return
       }
@@ -217,13 +256,16 @@ export default function GamePage() {
     } catch (error: any) {
       console.error('Erro ao inicializar jogo:', error)
       toast.error('Erro ao carregar jogo. Tente novamente.')
+      if (user?.role === 'PLAYER') {
+        router.push('/player/games')
+      }
     } finally {
       setInitializing(false)
     }
   }
 
   // Criar sessão com cenário selecionado
-  const createSession = async (scenarioId: number | null, gameId: number | null = null) => {
+  const createSession = async (scenarioId: number | null, gameId: number | null = null, roomId: number | null = null) => {
     setLoading(true)
     try {
       // Se gameId não foi fornecido, buscar o primeiro jogo disponível
@@ -237,12 +279,14 @@ export default function GamePage() {
             gameId = games[0].id // Usar o primeiro jogo disponível
           } else if (user?.role === 'PLAYER') {
             toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            router.push('/player/games')
             return
           }
         } catch (e: any) {
           console.error('Erro ao buscar jogos:', e)
           if (user?.role === 'PLAYER' && e.response?.status === 403) {
             toast.error('Você não tem acesso a nenhum jogo. Entre em contato com seu facilitador.')
+            router.push('/player/games')
             return
           }
         }
@@ -263,6 +307,7 @@ export default function GamePage() {
       // Criar nova sessão com cenário
       const createResponse = await api.post('/api/sessions/', {
         game_id: gameId,
+        room_id: roomId || undefined,
         llm_provider: llmConfig?.provider,
         llm_model: llmConfig?.model_name,
         scenario_id: scenarioId
@@ -515,6 +560,39 @@ export default function GamePage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {finalUser?.role === 'PLAYER' && (
+              <button
+                onClick={async () => {
+                  let gameId = session?.game_id || (urlGameId ? parseInt(urlGameId) : null)
+                  
+                  // Se não houver gameId, buscar o primeiro jogo disponível
+                  if (!gameId) {
+                    try {
+                      const gamesResponse = await api.get('/api/player/games')
+                      const games = gamesResponse.data || []
+                      if (games.length > 0) {
+                        gameId = games[0].id
+                      } else {
+                        // Se não houver jogos, voltar para a lista de jogos
+                        router.push('/player')
+                        return
+                      }
+                    } catch (error) {
+                      console.error('Erro ao buscar jogos:', error)
+                      router.push('/player')
+                      return
+                    }
+                  }
+                  
+                  router.push(`/player/games/${gameId}/rooms`)
+                }}
+                className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors flex items-center gap-2"
+                title="Voltar para salas"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Voltar para Salas
+              </button>
+            )}
             <button
               onClick={pauseSession}
               className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors flex items-center gap-2"
@@ -667,3 +745,17 @@ export default function GamePage() {
   )
 }
 
+export default function GamePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-gray-100">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Carregando...</p>
+        </div>
+      </div>
+    }>
+      <GamePageContent />
+    </Suspense>
+  )
+}

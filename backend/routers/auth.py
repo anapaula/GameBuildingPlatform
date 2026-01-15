@@ -189,4 +189,3 @@ async def get_invitation_info(token: str, db: Session = Depends(get_db)):
         "role": invitation.role.value,
         "expires_at": invitation.expires_at.isoformat() if invitation.expires_at else None
     }
-

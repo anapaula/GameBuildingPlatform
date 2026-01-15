@@ -5,3 +5,8 @@ ALTER TABLE scenarios
 ADD COLUMN IF NOT EXISTS file_url VARCHAR,
 ADD COLUMN IF NOT EXISTS file_content TEXT;
 
+
+
+
+
+

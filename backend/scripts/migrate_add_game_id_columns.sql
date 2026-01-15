@@ -23,3 +23,8 @@ CREATE INDEX IF NOT EXISTS idx_game_rules_game_id ON game_rules(game_id);
 CREATE INDEX IF NOT EXISTS idx_llm_configurations_game_id ON llm_configurations(game_id);
 CREATE INDEX IF NOT EXISTS idx_game_sessions_game_id ON game_sessions(game_id);
 
+
+
+
+
+

@@ -69,3 +69,8 @@ docker-compose logs backend | grep EMAIL
 
 Se as variáveis SMTP não estiverem configuradas, o sistema continuará funcionando, mas apenas registrará os e-mails no console do backend (para desenvolvimento/teste).
 
+
+
+
+
+

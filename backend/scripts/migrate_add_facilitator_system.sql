@@ -45,3 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_player_game_access_player_id ON player_game_acces
 CREATE INDEX IF NOT EXISTS idx_player_game_access_game_id ON player_game_access(game_id);
 CREATE INDEX IF NOT EXISTS idx_player_game_access_granted_by ON player_game_access(granted_by);
 
+
+
+
+
+

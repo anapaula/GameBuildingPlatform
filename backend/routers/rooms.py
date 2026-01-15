@@ -38,7 +38,8 @@ async def join_room(room_id: int, db: Session = Depends(get_db), current_user: U
         raise HTTPException(status_code=404, detail="Sala não encontrada")
     existing_member = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.user_id == current_user.id).first()
     if existing_member:
-        raise HTTPException(status_code=400, detail="Você já é membro desta sala")
+        # Se já é membro, retornar sucesso silenciosamente (idempotente)
+        return {"message": "Você já é membro desta sala"}
     current_members = db.query(RoomMember).filter(RoomMember.room_id == room_id).count()
     if current_members >= room.max_players:
         raise HTTPException(status_code=400, detail="Sala cheia")

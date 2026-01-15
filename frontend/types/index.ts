@@ -124,3 +124,27 @@ export interface Room {
   created_at: string
 }
 
+export interface PlayerRoom {
+  id: number
+  name: string
+  description?: string
+  max_players: number
+  is_active: boolean
+  created_at: string
+  member_count: number
+  sessions: Array<{
+    id: number
+    status: string
+    current_phase: number
+    created_at: string
+    last_activity?: string
+  }>
+  has_active_session: boolean
+  latest_session?: {
+    id: number
+    status: string
+    current_phase: number
+    created_at: string
+    last_activity?: string
+  }
+}

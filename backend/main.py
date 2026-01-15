@@ -38,7 +38,6 @@ app.include_router(audio.router, prefix="/api/audio", tags=["Áudio"])
 app.include_router(games.router, prefix="/api/admin/games", tags=["Jogos"])
 app.include_router(facilitator.router, prefix="/api/facilitator", tags=["Facilitador"])
 app.include_router(player.router, prefix="/api/player", tags=["Jogador"])
-app.include_router(player.router, prefix="/api/player", tags=["Jogador"])
 
 @app.get("/")
 async def root():

@@ -57,7 +57,7 @@ export default function LoginPage() {
         } else if (authUser.role === 'FACILITATOR') {
           router.replace('/facilitator')
         } else {
-          router.replace('/game')
+          router.replace('/player')
         }
       }
     }
@@ -134,7 +134,7 @@ export default function LoginPage() {
       } else if (userResponse.data.role === 'FACILITATOR') {
         window.location.href = '/facilitator'
       } else {
-        window.location.href = '/game'
+        window.location.href = '/player'
       }
     } catch (error: any) {
       console.error('Erro no login:', error)

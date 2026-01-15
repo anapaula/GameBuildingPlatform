@@ -105,4 +105,3 @@ async def get_current_facilitator_user(
             detail="Acesso negado. Apenas administradores ou facilitadores podem acessar este recurso."
         )
     return current_user
-

@@ -250,4 +250,3 @@ class PlayerGameAccess(Base):
     
     player = relationship("User", foreign_keys=[player_id], back_populates="game_accesses")
     game = relationship("Game")
-
