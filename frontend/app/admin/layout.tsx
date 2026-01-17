@@ -240,7 +240,7 @@ export default function AdminLayout({
                                 }`}
                               >
                                 <BookOpen className="h-4 w-4 mr-2" />
-                                Regras
+                                Elementos
                               </Link>
                               <Link
                                 href="/admin/scenarios"
@@ -252,7 +252,7 @@ export default function AdminLayout({
                                 }`}
                               >
                                 <BookOpen className="h-4 w-4 mr-2" />
-                                Cenários
+                                Cenas
                               </Link>
                               <Link
                                 href="/admin/llms"

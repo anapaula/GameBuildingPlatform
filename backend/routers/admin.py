@@ -224,6 +224,31 @@ async def get_game_rule(rule_id: int, db: Session = Depends(get_db), current_use
         raise HTTPException(status_code=404, detail="Regra não encontrada")
     return rule
 
+@router.post("/rules/upload")
+async def upload_rule_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Upload de arquivo para elementos do jogo (PDF, DOCX, TXT)."""
+    allowed_extensions = ['.pdf', '.docx', '.txt']
+    file_ext = Path(file.filename).suffix.lower()
+
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Formato de arquivo não suportado. Use: {', '.join(allowed_extensions)}")
+
+    try:
+        file_service = FileService()
+        file_data = await file.read()
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"rule_{timestamp}_{file.filename}"
+        file_path = await file_service.save_uploaded_file(file_data, filename, file_type="rule_file")
+        file_content = await file_service.extract_text_from_file(file_path, file_ext)
+        file_url = file_service.get_file_url(file_path, file_type="rule_file")
+        return {"file_url": file_url, "file_content": file_content, "file_name": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
+
 @router.put("/rules/{rule_id}", response_model=GameRuleResponse)
 async def update_game_rule(rule_id: int, rule_data: GameRuleCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):
     rule = db.query(GameRule).filter(GameRule.id == rule_id).first()
@@ -247,6 +272,32 @@ async def delete_game_rule(rule_id: int, db: Session = Depends(get_db), current_
     db.commit()
     return {"message": "Regra desativada com sucesso"}
 
+@router.get("/rules/files/{filename}")
+async def get_rule_file(filename: str, current_user: User = Depends(get_current_admin_user)):
+    """Serve arquivos de elementos do jogo."""
+    from fastapi.responses import FileResponse
+    file_service = FileService()
+    rule_files_dir = file_service.rule_files_dir.resolve()
+    file_path = rule_files_dir / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    try:
+        file_path.resolve().relative_to(rule_files_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    ext = Path(filename).suffix.lower()
+    media_types = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.txt': 'text/plain'
+    }
+    media_type = media_types.get(ext, 'application/octet-stream')
+
+    return FileResponse(str(file_path.resolve()), media_type=media_type)
+
 @router.post("/scenarios", response_model=ScenarioResponse, status_code=201)
 async def create_scenario(
     game_id: int = Form(...),
@@ -255,12 +306,31 @@ async def create_scenario(
     image_url: Optional[str] = Form(None),
     phase: int = Form(1),
     order: int = Form(0),
+    image_file: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
     file_url = None
     file_content = None
+
+    # Processar imagem se fornecida
+    if image_file and image_file.filename:
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        file_ext = Path(image_file.filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de imagem não suportado. Use: {', '.join(allowed_extensions)}")
+
+        try:
+            file_service = FileService()
+            file_data = await image_file.read()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_image_{timestamp}_{image_file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="scenario_image")
+            image_url = file_service.get_file_url(file_path, file_type="scenario_image")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
     
     # Processar arquivo se fornecido
     if file and file.filename:
@@ -323,6 +393,7 @@ async def update_scenario(
     image_url: Optional[str] = Form(None),
     phase: int = Form(1),
     order: int = Form(0),
+    image_file: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
@@ -357,11 +428,30 @@ async def update_scenario(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo: {str(e)}")
     
+    # Processar imagem se fornecida
+    if image_file and image_file.filename:
+        allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        file_ext = Path(image_file.filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de imagem não suportado. Use: {', '.join(allowed_extensions)}")
+
+        try:
+            file_service = FileService()
+            file_data = await image_file.read()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_image_{timestamp}_{image_file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="scenario_image")
+            scenario.image_url = file_service.get_file_url(file_path, file_type="scenario_image")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
+
     # Atualizar outros campos
     scenario.game_id = game_id
     scenario.name = name
     scenario.description = description
-    scenario.image_url = image_url
+    if image_url:
+        scenario.image_url = image_url
     scenario.phase = phase
     scenario.order = order
     
@@ -389,6 +479,34 @@ async def get_scenario_file(filename: str, current_user: User = Depends(get_curr
     media_type = media_types.get(ext, 'application/octet-stream')
     
     return FileResponse(str(file_path), media_type=media_type)
+
+@router.get("/scenarios/images/{filename}")
+async def get_scenario_image(filename: str):
+    """Serve imagens de cenários (público para exibição em tags img)"""
+    from fastapi.responses import FileResponse
+    file_service = FileService()
+    scenario_images_dir = file_service.scenario_images_dir.resolve()
+    file_path = scenario_images_dir / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+
+    try:
+        file_path.resolve().relative_to(scenario_images_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    ext = Path(filename).suffix.lower()
+    media_types = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    media_type = media_types.get(ext, 'image/jpeg')
+
+    return FileResponse(str(file_path.resolve()), media_type=media_type)
 
 @router.post("/llm/configs", response_model=LLMConfigResponse, status_code=201)
 async def create_llm_config(config_data: LLMConfigCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_admin_user)):

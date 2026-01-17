@@ -13,13 +13,23 @@ class FileService:
         # Diretório para capas de jogos
         self.game_covers_dir = Path(os.getenv("GAME_COVERS_DIR", "./game_covers"))
         self.game_covers_dir.mkdir(parents=True, exist_ok=True)
+        # Diretório para imagens de cenários
+        self.scenario_images_dir = Path(os.getenv("SCENARIO_IMAGES_DIR", "./scenario_images"))
+        self.scenario_images_dir.mkdir(parents=True, exist_ok=True)
+        # Diretório para arquivos de elementos do jogo (regras/mecânicas/etc.)
+        self.rule_files_dir = Path(os.getenv("RULE_FILES_DIR", "./rule_files"))
+        self.rule_files_dir.mkdir(parents=True, exist_ok=True)
     
     async def save_uploaded_file(self, file_data: bytes, filename: str, file_type: str = "scenario") -> str:
         """Salva arquivo enviado e retorna o caminho
-        file_type: 'scenario' ou 'game_cover'
+        file_type: 'scenario', 'game_cover', 'scenario_image' ou 'rule_file'
         """
         if file_type == "game_cover":
             file_path = self.game_covers_dir / filename
+        elif file_type == "scenario_image":
+            file_path = self.scenario_images_dir / filename
+        elif file_type == "rule_file":
+            file_path = self.rule_files_dir / filename
         else:
             file_path = self.upload_dir / filename
         async with aiofiles.open(file_path, 'wb') as f:
@@ -65,10 +75,14 @@ class FileService:
     
     def get_file_url(self, file_path: str, file_type: str = "scenario") -> str:
         """Retorna URL relativa para acessar o arquivo
-        file_type: 'scenario' ou 'game_cover'
+        file_type: 'scenario', 'game_cover', 'scenario_image' ou 'rule_file'
         """
         filename = Path(file_path).name
         if file_type == "game_cover":
             return f"/api/admin/games/covers/{filename}"
+        if file_type == "scenario_image":
+            return f"/api/admin/scenarios/images/{filename}"
+        if file_type == "rule_file":
+            return f"/api/admin/rules/files/{filename}"
         return f"/api/admin/scenarios/files/{filename}"
 

@@ -38,7 +38,14 @@ export default function ScenariosPage() {
     if (!gameId) return
     try {
       const res = await api.get(`/api/admin/scenarios?game_id=${gameId}`)
-      setScenarios(res.data)
+      const fetched = res.data || []
+      const sorted = fetched.slice().sort((a: Scenario, b: Scenario) => {
+        if (a.phase !== b.phase) {
+          return a.phase - b.phase
+        }
+        return a.order - b.order
+      })
+      setScenarios(sorted)
     } catch (error) {
       toast.error('Erro ao carregar cenários')
     } finally {
@@ -53,7 +60,7 @@ export default function ScenariosPage() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-900">Cenários do Jogo</h1>
+        <h1 className="text-3xl font-bold text-gray-900">Cenas do Jogo</h1>
         <button
           onClick={() => {
             setEditingScenario(null)
@@ -62,7 +69,7 @@ export default function ScenariosPage() {
           className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
         >
           <Plus className="h-5 w-5 mr-2" />
-          Novo Cenário
+          Nova cena
         </button>
       </div>
 
@@ -70,7 +77,7 @@ export default function ScenariosPage() {
         <ul className="divide-y divide-gray-200">
           {scenarios.length === 0 ? (
             <li className="px-4 py-5 sm:px-6">
-              <p className="text-gray-500 text-center">Nenhum cenário cadastrado ainda.</p>
+              <p className="text-gray-500 text-center">Nenhuma cena cadastrada ainda.</p>
             </li>
           ) : (
             scenarios.map((scenario) => (
@@ -92,6 +99,19 @@ export default function ScenariosPage() {
                           <span className="text-xs text-blue-600">Arquivo anexado</span>
                         </div>
                       )}
+                      {scenario.image_url && (
+                        <div className="mt-2">
+                          <img
+                            src={
+                              scenario.image_url.startsWith('http')
+                                ? scenario.image_url
+                                : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${scenario.image_url}`
+                            }
+                            alt={`Cena ${scenario.name}`}
+                            className="w-full h-32 object-cover rounded-md border"
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       {scenario.file_content && (
@@ -109,7 +129,7 @@ export default function ScenariosPage() {
                           setShowModal(true)
                         }}
                         className="text-blue-600 hover:text-blue-900"
-                        title="Editar cenário"
+                        title="Editar cena"
                       >
                         <Edit className="h-5 w-5" />
                       </button>
@@ -211,6 +231,8 @@ function ScenarioModal({
     phase: scenario?.phase || 1,
     order: scenario?.order || 0,
   })
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(scenario?.image_url || null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [filePreview, setFilePreview] = useState<string | null>(scenario?.file_url || null)
   const [fileContentPreview, setFileContentPreview] = useState<string | null>(scenario?.file_content || null)
@@ -226,6 +248,7 @@ function ScenarioModal({
         phase: scenario.phase || 1,
         order: scenario.order || 0,
       })
+      setImagePreview(scenario.image_url || null)
       setFilePreview(scenario.file_url || null)
       setFileContentPreview(scenario.file_content || null)
     } else {
@@ -236,9 +259,11 @@ function ScenarioModal({
         phase: 1,
         order: 0,
       })
+      setImagePreview(null)
       setFilePreview(null)
       setFileContentPreview(null)
     }
+    setSelectedImage(null)
     setSelectedFile(null)
   }, [scenario])
 
@@ -249,6 +274,21 @@ function ScenarioModal({
       reader.onerror = reject
       reader.readAsText(file, 'UTF-8')
     })
+  }
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase()
+    if (!allowedTypes.includes(fileExt)) {
+      toast.error('Formato de imagem não suportado. Use JPG, PNG, GIF ou WEBP.')
+      return
+    }
+
+    setSelectedImage(file)
+    setImagePreview(URL.createObjectURL(file))
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -304,6 +344,9 @@ function ScenarioModal({
         formDataToSend.append('image_url', formData.image_url || '')
         formDataToSend.append('phase', formData.phase.toString())
         formDataToSend.append('order', formData.order.toString())
+        if (selectedImage) {
+          formDataToSend.append('image_file', selectedImage)
+        }
         if (selectedFile) {
           formDataToSend.append('file', selectedFile)
           toast.loading('Atualizando cenário e processando arquivo...', { id: 'update-scenario' })
@@ -335,6 +378,9 @@ function ScenarioModal({
           formDataToSend.append('image_url', formData.image_url || '')
           formDataToSend.append('phase', formData.phase.toString())
           formDataToSend.append('order', formData.order.toString())
+          if (selectedImage) {
+            formDataToSend.append('image_file', selectedImage)
+          }
           formDataToSend.append('file', selectedFile)
           
           toast.loading('Criando cenário e processando arquivo...', { id: 'create-scenario' })
@@ -375,7 +421,7 @@ function ScenarioModal({
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
       <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
         <h3 className="text-lg font-bold text-gray-900 mb-4">
-          {scenario ? 'Editar Cenário' : 'Novo Cenário'}
+          {scenario ? 'Editar Cena' : 'Nova Cena'}
         </h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -398,13 +444,53 @@ function ScenarioModal({
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">URL da Imagem</label>
-            <input
-              type="text"
-              value={formData.image_url}
-              onChange={(e) => setFormData({ ...formData, image_url: e.target.value })}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-2">Imagem da Cena</label>
+            <div className="mt-1 flex items-center gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.gif,.webp"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+                <div className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-md hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                  <Upload className="h-5 w-5 text-gray-400" />
+                  <span className="text-sm text-gray-600">
+                    {selectedImage?.name || (imagePreview ? 'Imagem selecionada' : 'Clique para selecionar imagem')}
+                  </span>
+                </div>
+              </label>
+              {imagePreview && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedImage(null)
+                    setImagePreview(null)
+                    setFormData({ ...formData, image_url: '' })
+                  }}
+                  className="text-red-600 hover:text-red-800"
+                  title="Remover imagem"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {imagePreview && (
+              <div className="mt-3">
+                <img
+                  src={
+                    imagePreview.startsWith('http') || imagePreview.startsWith('blob:')
+                      ? imagePreview
+                      : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${imagePreview}`
+                  }
+                  alt="Prévia da cena"
+                  className="w-full h-32 object-cover rounded-md"
+                />
+              </div>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              Formatos aceitos: JPG, PNG, GIF, WEBP
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
