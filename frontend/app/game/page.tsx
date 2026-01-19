@@ -35,7 +35,7 @@ interface GameSession {
 }
 
 interface Interaction {
-  id: number
+  id: number | string
   session_id: number
   player_input: string
   player_input_type: string
@@ -47,6 +47,9 @@ interface Interaction {
   cost?: number
   response_time?: number
   created_at: string
+  message_type?: 'scene'
+  scene_image_url?: string
+  scene_name?: string
 }
 
 interface Scenario {
@@ -84,11 +87,13 @@ function GamePageContent() {
   // Estado para cenários (carregados automaticamente)
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0)
+  const [currentScenarioId, setCurrentScenarioId] = useState<number | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   // Verificação de autenticação
   useEffect(() => {
@@ -172,6 +177,8 @@ function GamePageContent() {
           const sessionResponse = await api.get(`/api/sessions/${urlSessionId}`)
           const session = sessionResponse.data
           setSession(session)
+          setCurrentScenarioId(session.current_scenario_id || null)
+          await loadScenarios(session.game_id)
           await loadHistory(session.id)
           return
         } catch (error: any) {
@@ -250,6 +257,8 @@ function GamePageContent() {
       }
 
       setSession(activeSession)
+      setCurrentScenarioId(activeSession.current_scenario_id || null)
+      await loadScenarios(activeSession.game_id)
       
       // Carregar histórico
       await loadHistory(activeSession.id)
@@ -315,6 +324,7 @@ function GamePageContent() {
       
       const activeSession = createResponse.data
       setSession(activeSession)
+      setCurrentScenarioId(activeSession.current_scenario_id || scenarioId || null)
       
       // Carregar histórico
       await loadHistory(activeSession.id)
@@ -347,6 +357,117 @@ function GamePageContent() {
     }
   }, [interactions])
 
+  const normalizeText = (text: string) => {
+    if (!text) return ''
+    return text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  }
+
+  const getIntroScenario = () => {
+    return (
+      scenarios.find((s) => normalizeText(s.name).startsWith('introducao')) ||
+      scenarios.find((s) => normalizeText(s.name).includes('introducao')) ||
+      null
+    )
+  }
+
+  const getSelectedElement = (text: string) => {
+    const normalized = normalizeText(text)
+    if (normalized.includes('agua')) return 'agua'
+    if (normalized.includes('fogo')) return 'fogo'
+    if (normalized.includes('terra')) return 'terra'
+    if (normalized.includes('ar')) return 'ar'
+    return null
+  }
+
+  const isCompletion = (text: string) => {
+    const normalized = normalizeText(text)
+    return ['finalizei', 'finalizar', 'conclui', 'concluir', 'terminei', 'terminar', 'pronto'].some((term) =>
+      normalized.includes(term)
+    )
+  }
+
+  const findScenarioByPrefix = (prefix: string) => {
+    const normalizedPrefix = normalizeText(prefix)
+    return scenarios.find((s) => normalizeText(s.name).startsWith(normalizedPrefix)) || null
+  }
+
+  const findScenarioByContains = (term: string) => {
+    const normalizedTerm = normalizeText(term)
+    return scenarios.find((s) => normalizeText(s.name).includes(normalizedTerm)) || null
+  }
+
+  const resolveScenarioForInput = (inputText: string) => {
+    const intro = getIntroScenario()
+    const current = scenarios.find((s) => s.id === currentScenarioId) || intro
+    if (!current) return null
+
+    if (intro && current.id === intro.id) {
+      const element = getSelectedElement(inputText)
+      if (!element) {
+        return intro
+      }
+
+      const portal =
+        findScenarioByContains(`Portal da ${element}`) ||
+        findScenarioByContains(`Portal do ${element}`) ||
+        findScenarioByContains(`Cena 0A`) ||
+        null
+      return portal || intro
+    }
+
+    if (isCompletion(inputText)) {
+      const normalizedName = normalizeText(current.name)
+      if (normalizedName.startsWith(normalizeText('Cena 0A'))) {
+        return findScenarioByPrefix('Cena 0B') || current
+      }
+      if (normalizedName.startsWith(normalizeText('Cena 0B'))) {
+        return findScenarioByPrefix('Cena 01 - Temperança') || findScenarioByPrefix('Cena 01') || current
+      }
+      const match = normalizedName.match(/cena\s*(\d{2})/)
+      if (match) {
+        const nextNumber = parseInt(match[1]) + 1
+        return findScenarioByPrefix(`Cena ${nextNumber.toString().padStart(2, '0')}`) || current
+      }
+    }
+
+    return current
+  }
+
+  const formatScenarioImageUrl = (imageUrl?: string) => {
+    if (!imageUrl) return null
+    if (imageUrl.startsWith('http') || imageUrl.startsWith('blob:') || imageUrl.startsWith('data:')) {
+      return imageUrl
+    }
+    return `${API_URL}${imageUrl}`
+  }
+
+  const appendSceneImageMessage = (scenario: Scenario | null) => {
+    if (!scenario?.image_url || !session) return
+
+    const lastSceneMessage = [...interactions].reverse().find((item) => item.message_type === 'scene')
+    if (lastSceneMessage?.scene_name === scenario.name) {
+      return
+    }
+
+    const imageUrl = formatScenarioImageUrl(scenario.image_url)
+    if (!imageUrl) return
+
+    const sceneMessage: Interaction = {
+      id: `scene-${scenario.id}-${Date.now()}`,
+      session_id: session.id,
+      player_input: '',
+      player_input_type: 'scene',
+      ai_response: '',
+      created_at: new Date().toISOString(),
+      message_type: 'scene',
+      scene_image_url: imageUrl,
+      scene_name: scenario.name,
+    }
+
+    setInteractions((prev) => [...prev, sceneMessage])
+    setCurrentScenarioId(scenario.id)
+  }
+
   // Enviar mensagem de texto
   const handleSendMessage = async () => {
     if (!playerInput.trim() || !session || loading) return
@@ -356,6 +477,11 @@ function GamePageContent() {
     setLoading(true)
 
     try {
+      if (scenarios.length > 0) {
+        const scenarioToShow = resolveScenarioForInput(inputText)
+        appendSceneImageMessage(scenarioToShow)
+      }
+
       const response = await api.post('/api/game/interact', {
         session_id: session.id,
         player_input: inputText,
@@ -369,6 +495,7 @@ function GamePageContent() {
       // Atualizar sessão
       const sessionResponse = await api.get(`/api/sessions/${session.id}`)
       setSession(sessionResponse.data)
+      setCurrentScenarioId(sessionResponse.data.current_scenario_id || currentScenarioId)
 
       toast.success('Resposta recebida!')
     } catch (error: any) {
@@ -423,6 +550,11 @@ function GamePageContent() {
 
     setLoading(true)
     try {
+      if (scenarios.length > 0) {
+        const scenarioToShow = resolveScenarioForInput('audio')
+        appendSceneImageMessage(scenarioToShow)
+      }
+
       const formData = new FormData()
       formData.append('audio_file', audioBlob, 'audio.webm')
       formData.append('session_id', session.id.toString())
@@ -436,7 +568,11 @@ function GamePageContent() {
 
       const newInteraction = response.data
       setInteractions(prev => [...prev, newInteraction])
-      
+
+      const sessionResponse = await api.get(`/api/sessions/${session.id}`)
+      setSession(sessionResponse.data)
+      setCurrentScenarioId(sessionResponse.data.current_scenario_id || currentScenarioId)
+
       toast.success('Áudio processado!')
     } catch (error: any) {
       console.error('Erro ao enviar áudio:', error)
@@ -453,7 +589,7 @@ function GamePageContent() {
       activeAudio.currentTime = 0
     }
 
-    const audio = new Audio(`http://localhost:8000${audioUrl}`)
+    const audio = new Audio(`${API_URL}${audioUrl}`)
     audio.play()
     setActiveAudio(audio)
 
@@ -629,45 +765,64 @@ function GamePageContent() {
             <div className="space-y-4">
               {interactions.map((interaction) => (
                 <div key={interaction.id} className="space-y-2">
-                  {/* Mensagem do jogador */}
-                  <div className="flex justify-end">
-                    <div className="bg-blue-500 text-white rounded-lg px-4 py-2 max-w-md">
-                      <p className="text-sm">{interaction.player_input}</p>
-                      {interaction.player_input_type === 'audio' && (
-                        <p className="text-xs opacity-75 mt-1">Mensagem de voz</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Resposta da IA */}
-                  <div className="flex justify-start">
-                    <div className="bg-gray-200 rounded-lg px-4 py-2 max-w-md">
-                      <p className="text-gray-800 whitespace-pre-wrap">{interaction.ai_response}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        {interaction.ai_response_audio_url && (
-                          <button
-                            onClick={() => playAudio(interaction.ai_response_audio_url!)}
-                            className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-xs"
-                          >
-                            {activeAudio && activeAudio.src.includes(interaction.ai_response_audio_url!) ? (
-                              <>
-                                <Pause className="h-3 w-3" />
-                                Pausar áudio
-                              </>
-                            ) : (
-                              <>
-                                <Volume2 className="h-3 w-3" />
-                                Ouvir resposta
-                              </>
-                            )}
-                          </button>
+                  {interaction.message_type === 'scene' ? (
+                    <div className="flex justify-center">
+                      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-3 w-full">
+                        <p className="text-xs text-gray-500 mb-2">
+                          Cena: {interaction.scene_name || 'Cena atual'}
+                        </p>
+                        {interaction.scene_image_url && (
+                          <img
+                            src={interaction.scene_image_url}
+                            alt={interaction.scene_name || 'Cena do jogo'}
+                            className="w-full h-64 md:h-96 object-cover rounded-md"
+                          />
                         )}
-                        <span className="text-xs text-gray-500">
-                          {interaction.response_time?.toFixed(2)}s • {interaction.llm_model}
-                        </span>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      {/* Mensagem do jogador */}
+                      <div className="flex justify-end">
+                        <div className="bg-blue-500 text-white rounded-lg px-4 py-2 max-w-md">
+                          <p className="text-sm">{interaction.player_input}</p>
+                          {interaction.player_input_type === 'audio' && (
+                            <p className="text-xs opacity-75 mt-1">Mensagem de voz</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Resposta da IA */}
+                      <div className="flex justify-start">
+                        <div className="bg-gray-200 rounded-lg px-4 py-2 max-w-md">
+                          <p className="text-gray-800 whitespace-pre-wrap">{interaction.ai_response}</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            {interaction.ai_response_audio_url && (
+                              <button
+                                onClick={() => playAudio(interaction.ai_response_audio_url!)}
+                                className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-xs"
+                              >
+                                {activeAudio && activeAudio.src.includes(interaction.ai_response_audio_url!) ? (
+                                  <>
+                                    <Pause className="h-3 w-3" />
+                                    Pausar áudio
+                                  </>
+                                ) : (
+                                  <>
+                                    <Volume2 className="h-3 w-3" />
+                                    Ouvir resposta
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            <span className="text-xs text-gray-500">
+                              {interaction.response_time?.toFixed(2)}s • {interaction.llm_model}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
               <div ref={messagesEndRef} />
