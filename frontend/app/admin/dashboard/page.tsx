@@ -121,14 +121,14 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      title: 'Regras',
+      title: 'Elementos do Jogo',
       value: stats.rules_count,
       icon: BookOpen,
       color: 'bg-blue-500',
       href: '/admin/rules',
     },
     {
-      title: 'Cenários',
+      title: 'Cenas do Jogo',
       value: stats.scenarios_count,
       icon: BookOpen,
       color: 'bg-green-500',
@@ -254,14 +254,14 @@ export default function DashboardPage() {
             className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <BookOpen className="h-5 w-5 text-blue-600 mr-3" />
-            <span className="text-sm font-medium text-gray-900">Gerenciar Regras</span>
+            <span className="text-sm font-medium text-gray-900">Gerenciar Elementos</span>
           </Link>
           <Link
             href="/admin/scenarios"
             className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <BookOpen className="h-5 w-5 text-green-600 mr-3" />
-            <span className="text-sm font-medium text-gray-900">Gerenciar Cenários</span>
+            <span className="text-sm font-medium text-gray-900">Gerenciar Cenas</span>
           </Link>
           <Link
             href="/admin/llms"

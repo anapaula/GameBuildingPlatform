@@ -118,7 +118,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
     def _extract_player_name(text: str) -> Optional[str]:
         if not text:
             return None
-        match = re.search(r"(me chamo|meu nome é|meu nome e|sou)\s+([A-Za-zÀ-ÿ' -]+)", text, re.IGNORECASE)
+        match = re.search(r"(me chamo|meu nome é|meu nome e|sou|chamo-me|nome\s*[:\-])\s*([A-Za-zÀ-ÿ' -]+)", text, re.IGNORECASE)
         if match:
             name = match.group(2).strip()
             name = re.split(r"(\s+e\s+|\s+tenho\s+|,|\.|;)", name)[0].strip()
@@ -149,7 +149,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
         if not text:
             return []
         players = []
-        pattern = r"jogador\\s*\\d+\\s*[:\\-]\\s*([A-Za-zÀ-ÿ' -]+)\\s*,\\s*(\\d{1,3})\\s*anos?"
+        pattern = r"jogador\\s*\\d+\\s*[:\\-]\\s*([A-Za-zÀ-ÿ' -]+?)\\s*(?:,|\\-|\\(|\\s)\\s*(\\d{1,3})\\s*anos?\\)?"
         for line in text.splitlines():
             match = re.search(r"^\\s*[-•]?\\s*" + pattern, line, re.IGNORECASE)
             if match:
@@ -193,7 +193,31 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
                 profile["count"] = _extract_player_count(interaction.player_input or "")
             if (profile["players"] or (profile["age"] and profile["name"])) and profile["count"]:
                 break
+        if profile["count"] is None:
+            if profile["players"]:
+                profile["count"] = len(profile["players"])
+            elif profile["age"] and profile["name"]:
+                profile["count"] = 1
+        if not profile["players"] and profile["age"] and profile["name"]:
+            profile["players"] = [{"name": profile["name"], "age": profile["age"]}]
         return profile
+
+    def _get_youngest_age(profile: Dict[str, Any]) -> Optional[int]:
+        ages = []
+        for player in profile.get("players") or []:
+            if isinstance(player.get("age"), int):
+                ages.append(player["age"])
+        if isinstance(profile.get("age"), int):
+            ages.append(profile["age"])
+        return min(ages) if ages else None
+
+    def _get_recent_interactions(limit: Optional[int] = None) -> List[SessionInteraction]:
+        query = db.query(SessionInteraction).filter(
+            SessionInteraction.session_id == session.id
+        ).order_by(SessionInteraction.created_at.asc())
+        if limit:
+            query = query.limit(limit)
+        return query.all()
 
     def _scene_by_prefix(prefix: str) -> Optional[Scenario]:
         for scenario in scenarios:
@@ -271,6 +295,25 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
     llm_service = LLMService(db)
     context = llm_service.build_game_context(session.id, current_scenario, game_rules)
     system_prompt = "Você é um assistente de jogo interativo. Responda em português do Brasil de forma envolvente e imersiva."
+    system_prompt += (
+        "\n\nINSTRUÇÕES DO JOGO (SEMPRE ENVIAR):"
+        "\n- Os elementos do Jogo iniciados com o termo História, podem ser acessados apenas quando jogador pedir mais informações sobre a história de um reino específico."
+        "\n- Inicie pela Cena intitulada Introdução. Nela será solicitado ao jogador que forneça nome, idade e quantidade de jogadores."
+        "\n- Nesse ponto, considere diversas formas de receber esses dados, mas tenha como padrão o seguinte exemplo:"
+        "\n- Jogador 1: Gabriel, 11 anos"
+        "\n- Jogador 2: Sofia, 9 anos"
+        "\n- O exemplo acima indica que temos 2 jogadores na sala sendo que o primeiro é o Gabriel de 11 anos e o segundo é a Sofia de 9 anos."
+        "\n- Essa informação deve ser mantida durante todo o jogo, portanto a mantenha para interação com os jogadores da sala de jogo atual."
+        "\n- A LLM sempre recebe esses dados como contexto antes de trazer a próxima cena do jogo. Dessa forma, ela mantém um diálogo educado sempre chamando o jogador pelo nome e com o tom de de comunicação adequado à idade do jogador ou jogadores. Se tiver mais de um jogador, sempre considere a idade do jogador mais novo para o tom da conversação."
+        "\n- Uma vez tendo recebido os dados de nome do jogador, idade e quantidade de jogadores, sempre os mantenha no contexto enviado para a LLM e de modo a apoiar a seleção das próximas cenas, que também dependerão de respostas dos jogadores. Essas respostas devem ser registradas para manter o fluxo e saber para qual ponto retornar no fluxo do jogo e portanto, também devem sempre ser enviadas como contexto para LLM."
+        "\n- Use o arquivo Introdução até que jogador selecione um dos elementos (Ar, Fogo, Água ou Terra)."
+        "\n- Uma vez que nome, idade e quantidade de jogadores foi informado e um dos elementos selecionado (Ar, Fogo, Água ou Terra), passe para a sequência do arquivo de cena de acordo com o elemento selecionado."
+        "\n- O elemento selecionado pelo jogador deve indicar qual Portal será aberto, em outras palavras se jogador selecionar elemento Água, o arquivo a ser aberto será Cena 0A - Portal da Água, se selecionar elemento Terra, o arquivo a ser aberto será Cena 0A - Portal da Terra, e assim por diante com todos os demais. Nesse caso, apenas uma das Cenas 0A será apresentada de acordo com a seleção do elemento ar, fogo, água ou terra."
+        "\n- A partir disso, a interação segue o arquivo Cena 0A com o portal do elemento selecionado pelo jogador. Ao finalizar todo o fluxo deste arquivo a partir da conversa com o jogador e salvando suas respostas como contexto para a próxima interação com o jogador, siga para o arquivo cujo título inicia com Cena 0B."
+        "\n- Após apresentar todo o conteúdo do arquivo cujo título inicia com Cena 0B siga para o arquivo cujo título inicia com Cena 01 - Temperança."
+        "\n- A partir do arquivo de Cena 01-Temperança, siga em ordem crescente de cenas, ou seja, Cena 02 - Temperança, Cena 03 - Temperança, etc."
+        "\n- Todas as cenas do jogo são selecionadas de acordo com a resposta do jogador. Uma vez tendo entrado num arquivo de cena só mude para a próxima cena quando passar por todo o fluxo da cena."
+    )
     
     # Se for a primeira interação, iniciar sempre pela cena "Introdução"
     if is_first_interaction and current_scenario and current_scenario.file_content:
@@ -319,6 +362,10 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
             system_prompt += f"\n- Nome: {profile['name']}"
         if profile.get("age"):
             system_prompt += f"\n- Idade: {profile['age']}"
+        youngest_age = _get_youngest_age(profile)
+        if youngest_age:
+            system_prompt += f"\n- Idade de referência para o tom: {youngest_age} anos (mais novo)."
+        if profile.get("age") or profile.get("players"):
             system_prompt += "\n- Tom de linguagem deve ser adequado à idade do jogador."
         system_prompt += "\n- Não pergunte novamente por nome, idade ou quantidade de jogadores se já informado."
 
@@ -341,6 +388,15 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
                 file_content = (rule.content or {}).get("file_content")
                 if file_content:
                     system_prompt += f"\n\n{rule.title}:\n{file_content}"
+
+    recent_interactions = _get_recent_interactions()
+    if recent_interactions:
+        system_prompt += "\n\nHISTÓRICO RECENTE DA SESSÃO (MANTER CONTEXTO):"
+        for interaction in recent_interactions:
+            if interaction.player_input:
+                system_prompt += f"\n- Jogador: {interaction.player_input}"
+            if interaction.ai_response:
+                system_prompt += f"\n- Narrador: {interaction.ai_response}"
 
     if current_scenario and current_scenario.file_content:
         system_prompt += f"\n\nCENA ATUAL:\n{current_scenario.name}\n{current_scenario.file_content}"
