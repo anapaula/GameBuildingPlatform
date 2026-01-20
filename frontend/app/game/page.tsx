@@ -50,6 +50,8 @@ interface Interaction {
   message_type?: 'scene'
   scene_image_url?: string
   scene_name?: string
+  pending?: boolean
+  error?: boolean
 }
 
 interface Scenario {
@@ -441,6 +443,15 @@ function GamePageContent() {
     return `${API_URL}${imageUrl}`
   }
 
+  const getCurrentSceneBackground = () => {
+    const lastSceneMessage = [...interactions].reverse().find((item) => item.message_type === 'scene')
+    if (lastSceneMessage?.scene_image_url) {
+      return lastSceneMessage.scene_image_url
+    }
+    const currentScenario = scenarios.find((s) => s.id === currentScenarioId)
+    return formatScenarioImageUrl(currentScenario?.image_url || undefined)
+  }
+
   const appendSceneImageMessage = (scenario: Scenario | null) => {
     if (!scenario?.image_url || !session) return
 
@@ -468,6 +479,40 @@ function GamePageContent() {
     setCurrentScenarioId(scenario.id)
   }
 
+  const appendPendingInteraction = (inputText: string, inputType: 'text' | 'audio') => {
+    if (!session) return null
+    const tempId = `pending-${Date.now()}`
+    const pendingInteraction: Interaction = {
+      id: tempId,
+      session_id: session.id,
+      player_input: inputText,
+      player_input_type: inputType,
+      ai_response: '...',
+      created_at: new Date().toISOString(),
+      pending: true,
+    }
+    setInteractions((prev) => [...prev, pendingInteraction])
+    return tempId
+  }
+
+  const replacePendingInteraction = (tempId: string | null, newInteraction: Interaction) => {
+    if (!tempId) return
+    setInteractions((prev) =>
+      prev.map((item) => (item.id === tempId ? newInteraction : item))
+    )
+  }
+
+  const markPendingError = (tempId: string | null, message: string) => {
+    if (!tempId) return
+    setInteractions((prev) =>
+      prev.map((item) =>
+        item.id === tempId
+          ? { ...item, ai_response: message, pending: false, error: true }
+          : item
+      )
+    )
+  }
+
   // Enviar mensagem de texto
   const handleSendMessage = async () => {
     if (!playerInput.trim() || !session || loading) return
@@ -476,12 +521,14 @@ function GamePageContent() {
     setPlayerInput('')
     setLoading(true)
 
+    let pendingId: string | null = null
     try {
       if (scenarios.length > 0) {
         const scenarioToShow = resolveScenarioForInput(inputText)
         appendSceneImageMessage(scenarioToShow)
       }
 
+      pendingId = appendPendingInteraction(inputText, 'text')
       const response = await api.post('/api/game/interact', {
         session_id: session.id,
         player_input: inputText,
@@ -490,7 +537,7 @@ function GamePageContent() {
       })
 
       const newInteraction = response.data
-      setInteractions(prev => [...prev, newInteraction])
+      replacePendingInteraction(pendingId, newInteraction)
       
       // Atualizar sessão
       const sessionResponse = await api.get(`/api/sessions/${session.id}`)
@@ -501,6 +548,7 @@ function GamePageContent() {
     } catch (error: any) {
       console.error('Erro ao enviar mensagem:', error)
       toast.error(error.response?.data?.detail || 'Erro ao enviar mensagem')
+      markPendingError(pendingId, 'Erro ao obter resposta da IA.')
       setPlayerInput(inputText) // Restaurar texto em caso de erro
     } finally {
       setLoading(false)
@@ -549,12 +597,14 @@ function GamePageContent() {
     if (!session || loading) return
 
     setLoading(true)
+    let pendingId: string | null = null
     try {
       if (scenarios.length > 0) {
         const scenarioToShow = resolveScenarioForInput('audio')
         appendSceneImageMessage(scenarioToShow)
       }
 
+      pendingId = appendPendingInteraction('Mensagem de voz enviada.', 'audio')
       const formData = new FormData()
       formData.append('audio_file', audioBlob, 'audio.webm')
       formData.append('session_id', session.id.toString())
@@ -567,7 +617,7 @@ function GamePageContent() {
       })
 
       const newInteraction = response.data
-      setInteractions(prev => [...prev, newInteraction])
+      replacePendingInteraction(pendingId, newInteraction)
 
       const sessionResponse = await api.get(`/api/sessions/${session.id}`)
       setSession(sessionResponse.data)
@@ -577,6 +627,7 @@ function GamePageContent() {
     } catch (error: any) {
       console.error('Erro ao enviar áudio:', error)
       toast.error(error.response?.data?.detail || 'Erro ao processar áudio')
+      markPendingError(pendingId, 'Erro ao obter resposta da IA.')
     } finally {
       setLoading(false)
     }
@@ -707,6 +758,8 @@ function GamePageContent() {
     )
   }
 
+  const sceneBackground = getCurrentSceneBackground()
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex flex-col">
       {/* Header */}
@@ -752,17 +805,26 @@ function GamePageContent() {
       <div className="flex-1 flex flex-col max-w-7xl mx-auto w-full p-4">
         <div 
           ref={chatContainerRef}
-          className="flex-1 bg-white/95 backdrop-blur-md rounded-lg shadow-xl overflow-y-auto p-6 mb-4"
+          className="flex-1 bg-white/95 backdrop-blur-md rounded-lg shadow-xl overflow-y-auto p-6 mb-4 relative"
+          style={{
+            backgroundImage: sceneBackground ? `url(${sceneBackground})` : undefined,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+          }}
         >
+          {sceneBackground && (
+            <div className="absolute inset-0 bg-white/70" />
+          )}
           {interactions.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-gray-500">
+            <div className="flex items-center justify-center h-full text-gray-500 relative z-10">
               <div className="text-center">
                 <p className="text-lg font-semibold mb-2">Bem-vindo ao jogo!</p>
                 <p className="text-sm">Comece digitando uma mensagem ou gravando um áudio.</p>
               </div>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-4 relative z-10">
               {interactions.map((interaction) => (
                 <div key={interaction.id} className="space-y-2">
                   {interaction.message_type === 'scene' ? (
@@ -795,9 +857,16 @@ function GamePageContent() {
                       {/* Resposta da IA */}
                       <div className="flex justify-start">
                         <div className="bg-gray-200 rounded-lg px-4 py-2 max-w-md">
-                          <p className="text-gray-800 whitespace-pre-wrap">{interaction.ai_response}</p>
+                          {interaction.pending ? (
+                            <div className="flex items-center gap-2 text-gray-700">
+                              <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                              <span className="text-sm">Narrador está preparando a resposta...</span>
+                            </div>
+                          ) : (
+                            <p className="text-gray-800 whitespace-pre-wrap">{interaction.ai_response}</p>
+                          )}
                           <div className="flex items-center gap-2 mt-2">
-                            {interaction.ai_response_audio_url && (
+                            {interaction.ai_response_audio_url && !interaction.pending && (
                               <button
                                 onClick={() => playAudio(interaction.ai_response_audio_url!)}
                                 className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-xs"
@@ -830,7 +899,7 @@ function GamePageContent() {
           )}
 
           {loading && (
-            <div className="flex justify-start mt-4">
+            <div className="flex justify-start mt-4 relative z-10">
               <div className="bg-gray-200 rounded-lg px-4 py-2">
                 <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
               </div>
