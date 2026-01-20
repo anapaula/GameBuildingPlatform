@@ -122,6 +122,7 @@ class ScenarioCreate(BaseModel):
     name: str
     description: Optional[str] = None
     image_url: Optional[str] = None
+    video_url: Optional[str] = None
     file_url: Optional[str] = None
     file_content: Optional[str] = None
     phase: int = 1
@@ -133,6 +134,7 @@ class ScenarioResponse(BaseModel):
     name: str
     description: Optional[str]
     image_url: Optional[str]
+    video_url: Optional[str]
     file_url: Optional[str]
     file_content: Optional[str]
     phase: int

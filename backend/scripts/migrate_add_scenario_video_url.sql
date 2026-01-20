@@ -1,0 +1,2 @@
+ALTER TABLE scenarios
+ADD COLUMN IF NOT EXISTS video_url VARCHAR;

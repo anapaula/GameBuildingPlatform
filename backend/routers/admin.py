@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
 from database import get_db
-from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember
+from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember, SessionScenario
 from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse
 from services.email_service import EmailService
 from auth import get_current_admin_user
@@ -304,9 +304,11 @@ async def create_scenario(
     name: str = Form(...),
     description: Optional[str] = Form(None),
     image_url: Optional[str] = Form(None),
+    video_url: Optional[str] = Form(None),
     phase: int = Form(1),
     order: int = Form(0),
     image_file: Optional[UploadFile] = File(None),
+    video_file: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
@@ -331,6 +333,24 @@ async def create_scenario(
             image_url = file_service.get_file_url(file_path, file_type="scenario_image")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
+
+    # Processar vídeo se fornecido
+    if video_file and video_file.filename:
+        allowed_extensions = ['.mp4', '.webm', '.ogg']
+        file_ext = Path(video_file.filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de vídeo não suportado. Use: {', '.join(allowed_extensions)}")
+
+        try:
+            file_service = FileService()
+            file_data = await video_file.read()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_video_{timestamp}_{video_file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="scenario_video")
+            video_url = file_service.get_file_url(file_path, file_type="scenario_video")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar vídeo: {str(e)}")
     
     # Processar arquivo se fornecido
     if file and file.filename:
@@ -360,6 +380,7 @@ async def create_scenario(
         name=name,
         description=description,
         image_url=image_url,
+        video_url=video_url,
         file_url=file_url,
         file_content=file_content,
         phase=phase,
@@ -391,9 +412,13 @@ async def update_scenario(
     name: str = Form(...),
     description: Optional[str] = Form(None),
     image_url: Optional[str] = Form(None),
+    video_url: Optional[str] = Form(None),
     phase: int = Form(1),
     order: int = Form(0),
+    remove_image: bool = Form(False),
+    remove_video: bool = Form(False),
     image_file: Optional[UploadFile] = File(None),
+    video_file: Optional[UploadFile] = File(None),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
@@ -446,18 +471,60 @@ async def update_scenario(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Erro ao processar imagem: {str(e)}")
 
+    # Processar vídeo se fornecido
+    if video_file and video_file.filename:
+        allowed_extensions = ['.mp4', '.webm', '.ogg']
+        file_ext = Path(video_file.filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail=f"Formato de vídeo não suportado. Use: {', '.join(allowed_extensions)}")
+
+        try:
+            file_service = FileService()
+            file_data = await video_file.read()
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            filename = f"scenario_video_{timestamp}_{video_file.filename}"
+            file_path = await file_service.save_uploaded_file(file_data, filename, file_type="scenario_video")
+            scenario.video_url = file_service.get_file_url(file_path, file_type="scenario_video")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao processar vídeo: {str(e)}")
+
     # Atualizar outros campos
     scenario.game_id = game_id
     scenario.name = name
     scenario.description = description
-    if image_url:
-        scenario.image_url = image_url
+    if image_url is not None:
+        scenario.image_url = image_url or None
+    if video_url is not None:
+        scenario.video_url = video_url or None
+    if remove_image:
+        scenario.image_url = None
+    if remove_video:
+        scenario.video_url = None
     scenario.phase = phase
     scenario.order = order
     
     db.commit()
     db.refresh(scenario)
     return scenario
+
+@router.delete("/scenarios/{scenario_id}")
+async def delete_scenario(
+    scenario_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    scenario = db.query(Scenario).filter(Scenario.id == scenario_id).first()
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Cenário não encontrado")
+    # Remover vínculos antes de deletar para evitar erro de FK
+    db.query(SessionScenario).filter(SessionScenario.scenario_id == scenario_id).delete()
+    db.query(GameSession).filter(GameSession.current_scenario_id == scenario_id).update(
+        {"current_scenario_id": None}
+    )
+    db.delete(scenario)
+    db.commit()
+    return {"message": "Cena removida com sucesso"}
 
 @router.get("/scenarios/files/{filename}")
 async def get_scenario_file(filename: str, current_user: User = Depends(get_current_admin_user)):
@@ -505,6 +572,32 @@ async def get_scenario_image(filename: str):
         '.webp': 'image/webp'
     }
     media_type = media_types.get(ext, 'image/jpeg')
+
+    return FileResponse(str(file_path.resolve()), media_type=media_type)
+
+@router.get("/scenarios/videos/{filename}")
+async def get_scenario_video(filename: str):
+    """Serve vídeos de cenários (público para exibição no player)"""
+    from fastapi.responses import FileResponse
+    file_service = FileService()
+    scenario_videos_dir = file_service.scenario_videos_dir.resolve()
+    file_path = scenario_videos_dir / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Vídeo não encontrado")
+
+    try:
+        file_path.resolve().relative_to(scenario_videos_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    ext = Path(filename).suffix.lower()
+    media_types = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.ogg': 'video/ogg'
+    }
+    media_type = media_types.get(ext, 'application/octet-stream')
 
     return FileResponse(str(file_path.resolve()), media_type=media_type)
 

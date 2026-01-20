@@ -53,6 +53,18 @@ export default function ScenariosPage() {
     }
   }
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('Tem certeza que deseja remover esta cena?')) return
+
+    try {
+      await api.delete(`/api/admin/scenarios/${id}`)
+      toast.success('Cena removida')
+      fetchScenarios()
+    } catch (error) {
+      toast.error('Erro ao remover cena')
+    }
+  }
+
   if (loading) {
     return <div className="text-center py-12">Carregando...</div>
   }
@@ -112,6 +124,19 @@ export default function ScenariosPage() {
                           />
                         </div>
                       )}
+                      {scenario.video_url && (
+                        <div className="mt-2">
+                          <video
+                            controls
+                            className="w-full h-32 rounded-md border bg-black"
+                            src={
+                              scenario.video_url.startsWith('http')
+                                ? scenario.video_url
+                                : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${scenario.video_url}`
+                            }
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="flex gap-2">
                       {scenario.file_content && (
@@ -132,6 +157,13 @@ export default function ScenariosPage() {
                         title="Editar cena"
                       >
                         <Edit className="h-5 w-5" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(scenario.id)}
+                        className="text-red-600 hover:text-red-900"
+                        title="Remover cena"
+                      >
+                        <Trash2 className="h-5 w-5" />
                       </button>
                     </div>
                   </div>
@@ -228,15 +260,20 @@ function ScenarioModal({
     name: scenario?.name || '',
     description: scenario?.description || '',
     image_url: scenario?.image_url || '',
+    video_url: scenario?.video_url || '',
     phase: scenario?.phase || 1,
     order: scenario?.order || 0,
   })
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(scenario?.image_url || null)
+  const [selectedVideo, setSelectedVideo] = useState<File | null>(null)
+  const [videoPreview, setVideoPreview] = useState<string | null>(scenario?.video_url || null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [filePreview, setFilePreview] = useState<string | null>(scenario?.file_url || null)
   const [fileContentPreview, setFileContentPreview] = useState<string | null>(scenario?.file_content || null)
   const [isReadingFile, setIsReadingFile] = useState(false)
+  const [removeImage, setRemoveImage] = useState(false)
+  const [removeVideo, setRemoveVideo] = useState(false)
 
   // Resetar form quando scenario mudar
   useEffect(() => {
@@ -245,10 +282,12 @@ function ScenarioModal({
         name: scenario.name || '',
         description: scenario.description || '',
         image_url: scenario.image_url || '',
+        video_url: scenario.video_url || '',
         phase: scenario.phase || 1,
         order: scenario.order || 0,
       })
       setImagePreview(scenario.image_url || null)
+      setVideoPreview(scenario.video_url || null)
       setFilePreview(scenario.file_url || null)
       setFileContentPreview(scenario.file_content || null)
     } else {
@@ -256,15 +295,20 @@ function ScenarioModal({
         name: '',
         description: '',
         image_url: '',
+        video_url: '',
         phase: 1,
         order: 0,
       })
       setImagePreview(null)
+      setVideoPreview(null)
       setFilePreview(null)
       setFileContentPreview(null)
     }
     setSelectedImage(null)
+    setSelectedVideo(null)
     setSelectedFile(null)
+    setRemoveImage(false)
+    setRemoveVideo(false)
   }, [scenario])
 
   const readTextFile = async (file: File): Promise<string> => {
@@ -289,6 +333,23 @@ function ScenarioModal({
 
     setSelectedImage(file)
     setImagePreview(URL.createObjectURL(file))
+    setRemoveImage(false)
+  }
+
+  const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const allowedTypes = ['.mp4', '.webm', '.ogg']
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase()
+    if (!allowedTypes.includes(fileExt)) {
+      toast.error('Formato de vídeo não suportado. Use MP4, WEBM ou OGG.')
+      return
+    }
+
+    setSelectedVideo(file)
+    setVideoPreview(URL.createObjectURL(file))
+    setRemoveVideo(false)
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -342,10 +403,16 @@ function ScenarioModal({
         formDataToSend.append('name', formData.name)
         formDataToSend.append('description', formData.description || '')
         formDataToSend.append('image_url', formData.image_url || '')
+        formDataToSend.append('video_url', formData.video_url || '')
         formDataToSend.append('phase', formData.phase.toString())
         formDataToSend.append('order', formData.order.toString())
+        formDataToSend.append('remove_image', removeImage ? 'true' : 'false')
+        formDataToSend.append('remove_video', removeVideo ? 'true' : 'false')
         if (selectedImage) {
           formDataToSend.append('image_file', selectedImage)
+        }
+        if (selectedVideo) {
+          formDataToSend.append('video_file', selectedVideo)
         }
         if (selectedFile) {
           formDataToSend.append('file', selectedFile)
@@ -376,10 +443,16 @@ function ScenarioModal({
           formDataToSend.append('name', formData.name)
           formDataToSend.append('description', formData.description || '')
           formDataToSend.append('image_url', formData.image_url || '')
+          formDataToSend.append('video_url', formData.video_url || '')
           formDataToSend.append('phase', formData.phase.toString())
           formDataToSend.append('order', formData.order.toString())
+          formDataToSend.append('remove_image', removeImage ? 'true' : 'false')
+          formDataToSend.append('remove_video', removeVideo ? 'true' : 'false')
           if (selectedImage) {
             formDataToSend.append('image_file', selectedImage)
+          }
+          if (selectedVideo) {
+            formDataToSend.append('video_file', selectedVideo)
           }
           formDataToSend.append('file', selectedFile)
           
@@ -467,6 +540,7 @@ function ScenarioModal({
                     setSelectedImage(null)
                     setImagePreview(null)
                     setFormData({ ...formData, image_url: '' })
+                    setRemoveImage(true)
                   }}
                   className="text-red-600 hover:text-red-800"
                   title="Remover imagem"
@@ -490,6 +564,56 @@ function ScenarioModal({
             )}
             <p className="mt-1 text-xs text-gray-500">
               Formatos aceitos: JPG, PNG, GIF, WEBP
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Vídeo da Cena</label>
+            <div className="mt-1 flex items-center gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".mp4,.webm,.ogg"
+                  onChange={handleVideoChange}
+                  className="hidden"
+                />
+                <div className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-md hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                  <Upload className="h-5 w-5 text-gray-400" />
+                  <span className="text-sm text-gray-600">
+                    {selectedVideo?.name || (videoPreview ? 'Vídeo selecionado' : 'Clique para selecionar vídeo')}
+                  </span>
+                </div>
+              </label>
+              {videoPreview && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedVideo(null)
+                    setVideoPreview(null)
+                    setFormData({ ...formData, video_url: '' })
+                    setRemoveVideo(true)
+                  }}
+                  className="text-red-600 hover:text-red-800"
+                  title="Remover vídeo"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {videoPreview && (
+              <div className="mt-3">
+                <video
+                  controls
+                  className="w-full h-40 rounded-md bg-black"
+                  src={
+                    videoPreview.startsWith('http') || videoPreview.startsWith('blob:')
+                      ? videoPreview
+                      : `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${videoPreview}`
+                  }
+                />
+              </div>
+            )}
+            <p className="mt-1 text-xs text-gray-500">
+              Formatos aceitos: MP4, WEBM, OGG
             </p>
           </div>
           <div>

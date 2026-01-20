@@ -47,8 +47,9 @@ interface Interaction {
   cost?: number
   response_time?: number
   created_at: string
-  message_type?: 'scene'
+  message_type?: 'scene' | 'intro'
   scene_image_url?: string
+  scene_video_url?: string
   scene_name?: string
   pending?: boolean
   error?: boolean
@@ -59,7 +60,9 @@ interface Scenario {
   name: string
   description?: string
   image_url?: string
+  video_url?: string
   file_url?: string
+  file_content?: string
   phase: number
   order: number
 }
@@ -90,6 +93,13 @@ function GamePageContent() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [currentScenarioIndex, setCurrentScenarioIndex] = useState(0)
   const [currentScenarioId, setCurrentScenarioId] = useState<number | null>(null)
+  const [forcedSceneBackground, setForcedSceneBackground] = useState<string | null>(null)
+  const [playerProfile, setPlayerProfile] = useState<{
+    count?: number
+    name?: string
+    age?: number
+    players?: Array<{ name: string; age: number }>
+  } | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -180,8 +190,8 @@ function GamePageContent() {
           const session = sessionResponse.data
           setSession(session)
           setCurrentScenarioId(session.current_scenario_id || null)
-          await loadScenarios(session.game_id)
-          await loadHistory(session.id)
+          const loadedScenarios = await loadScenarios(session.game_id)
+          await loadHistory(session.id, loadedScenarios)
           return
         } catch (error: any) {
           console.error('Erro ao carregar sessão:', error)
@@ -260,10 +270,9 @@ function GamePageContent() {
 
       setSession(activeSession)
       setCurrentScenarioId(activeSession.current_scenario_id || null)
-      await loadScenarios(activeSession.game_id)
-      
+      const loadedScenarios = await loadScenarios(activeSession.game_id)
       // Carregar histórico
-      await loadHistory(activeSession.id)
+      await loadHistory(activeSession.id, loadedScenarios)
     } catch (error: any) {
       console.error('Erro ao inicializar jogo:', error)
       toast.error('Erro ao carregar jogo. Tente novamente.')
@@ -315,6 +324,8 @@ function GamePageContent() {
         console.error('Erro ao obter LLM ativa:', e)
       }
 
+      const loadedScenarios = await loadScenarios(gameId)
+
       // Criar nova sessão com cenário
       const createResponse = await api.post('/api/sessions/', {
         game_id: gameId,
@@ -329,7 +340,7 @@ function GamePageContent() {
       setCurrentScenarioId(activeSession.current_scenario_id || scenarioId || null)
       
       // Carregar histórico
-      await loadHistory(activeSession.id)
+      await loadHistory(activeSession.id, loadedScenarios)
     } catch (error: any) {
       console.error('Erro ao criar sessão:', error)
       toast.error(error.response?.data?.detail || 'Erro ao criar sessão')
@@ -341,11 +352,71 @@ function GamePageContent() {
   }
 
 
+  const buildIntroMessages = (scenario: Scenario, sessionId: number) => {
+    const messages: Interaction[] = []
+    const imageUrl = formatScenarioImageUrl(scenario.image_url)
+    const videoUrl = formatScenarioVideoUrl(scenario.video_url)
+    if (imageUrl) {
+      setForcedSceneBackground(imageUrl)
+    }
+    if (imageUrl || videoUrl) {
+      messages.push({
+        id: `scene-${scenario.id}-${Date.now()}`,
+        session_id: sessionId,
+        player_input: '',
+        player_input_type: 'scene',
+        ai_response: '',
+        created_at: new Date().toISOString(),
+        message_type: 'scene',
+        scene_image_url: imageUrl || undefined,
+        scene_video_url: videoUrl || undefined,
+        scene_name: scenario.name,
+      })
+    }
+
+    if (scenario.file_content) {
+      messages.push({
+        id: `intro-${scenario.id}-${Date.now()}`,
+        session_id: sessionId,
+        player_input: '',
+        player_input_type: 'intro',
+        ai_response: scenario.file_content,
+        created_at: new Date().toISOString(),
+        message_type: 'intro',
+      })
+    }
+    return messages
+  }
+
+  const getIntroStartScenario = (list: Scenario[]) => {
+    return (
+      list.find((s) => normalizeText(s.name) === 'introducao') ||
+      list.find((s) => normalizeText(s.name).startsWith('introducao')) ||
+      list.find((s) => normalizeText(s.name).includes('introducao')) ||
+      list.find((s) => normalizeText(s.file_url || '').includes('introducao')) ||
+      list[0] ||
+      null
+    )
+  }
+
   // Carregar histórico
-  const loadHistory = async (sessionId: number) => {
+  const loadHistory = async (sessionId: number, scenariosOverride?: Scenario[]) => {
     try {
       const response = await api.get(`/api/game/${sessionId}/history`)
       const history = response.data || []
+      if (history.length === 0) {
+        const list = scenariosOverride && scenariosOverride.length > 0 ? scenariosOverride : scenarios
+        const introScenario = getIntroStartScenario(list)
+        if (introScenario) {
+          const introImageUrl = formatScenarioImageUrl(introScenario.image_url)
+          if (introImageUrl) {
+            setForcedSceneBackground(introImageUrl)
+          }
+          setCurrentScenarioId(introScenario.id)
+          setInteractions(buildIntroMessages(introScenario, sessionId))
+          return
+        }
+      }
       setInteractions(history.reverse()) // Ordenar do mais antigo para o mais recente
     } catch (error: any) {
       console.error('Erro ao carregar histórico:', error)
@@ -364,10 +435,131 @@ function GamePageContent() {
     return text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
   }
 
+  const extractPlayerProfile = (text: string) => {
+    const players: Array<{ name: string; age: number }> = []
+    const pattern = /jogador\s*\d+\s*[:\-]\s*([A-Za-zÀ-ÿ' -]+?)\s*(?:,|\s)\s*(\d{1,3})\s*anos?/gi
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      const name = match[1].trim()
+      const age = parseInt(match[2])
+      if (name && age) {
+        players.push({ name, age })
+      }
+    }
+    const countMatch = /(\d{1,2})\s*jogadores?/i.exec(text)
+    const count = countMatch ? parseInt(countMatch[1]) : players.length || undefined
+    const nameMatch = /(me chamo|meu nome e|meu nome é|sou)\s+([A-Za-zÀ-ÿ' -]+)/i.exec(text)
+    const ageMatch = /(\d{1,3})\s*anos?/i.exec(text)
+    const name = nameMatch ? nameMatch[2].trim() : undefined
+    const age = ageMatch ? parseInt(ageMatch[1]) : undefined
+    const completed = (players.length > 0 || (name && age)) && (count || players.length > 0)
+    return { players, count, name, age, completed }
+  }
+
+  const buildPromptContext = (inputText: string) => {
+    const basePrompt = `A LLM sempre recebe os dados de nome, idade e quantidade de jogadores como contexto antes de trazer a próxima cena do jogo. Dessa forma, ela mantém um diálogo educado sempre chamando o jogador pelo nome e com o tom de de comunicação adequado à idade do jogador ou jogadores. Se tiver mais de um jogador, sempre considere a idade do jogador mais novo para o tom da conversação.
+- Salve os dados de nome do jogador, idade e quantidade de jogadores, pois SEMPRE será utilizado como contexto da LLM.
+- Uma vez tendo recebido os dados de nome do jogador, idade e quantidade de jogadores, sempre os mantenha no contexto enviado para a LLM e de modo a apoiar a seleção das próximas cenas, que também dependerão de respostas dos jogadores. Essas respostas devem ser registradas para manter o fluxo e saber para qual ponto retornar no fluxo do jogo e portanto, também devem sempre ser enviadas como contexto para LLM.
+- Use o arquivo Introdução até que jogador selecione um dos elementos (Ar, Fogo, Água ou Terra).
+- Uma vez que nome, idade e quantidade de jogadores foi informado e um dos elementos selecionado (Ar, Fogo, Água ou Terra), passe para a sequência do arquivo de cena de acordo com o elemento selecionado.
+- O elemento selecionado pelo jogador deve indicar qual Portal será aberto, em outras palavras se jogador selecionar elemento Água, o arquivo a ser aberto será Cena 0A - Portal da Água, se jogador selecionar elemento Terra, o arquivo a ser aberto será Cena 0A - Portal da Terra, e assim por diante com todos os demais. Nesse caso, apenas uma das Cenas 0A será apresentada de acordo com a seleção do elemento ar, fogo, água ou terra.
+- A partir disso, a interação segue o arquivo Cena 0A com o portal do elemento selecionado pelo jogador. Ao finalizar todo o fluxo deste arquivo a partir da conversa com o jogador e salvando suas respostas como contexto para a próxima interação com o jogador, siga para o arquivo cujo título inicia com Cena 0B.
+- Após apresentar todo o conteúdo do arquivo cujo título inicia com Cena 0B siga para o arquivo cujo título inicia com Cena 01 - Temperança.
+- A partir do arquivo de Cena 01-Temperança, siga em ordem crescente de cenas, ou seja, Cena 02 - Temperança, Cena 03 - Temperança, etc.
+- Todas as cenas do jogo são selecionadas de acordo com a resposta do jogador. Uma vez tendo entrado num arquivo de cena só mude para a próxima cena quando passar por todo o fluxo da cena.
+- Sempre que for apresentar conteúdo de uma cena traga a imagem e/ou vídeo associada a esta cena no chat.
+
+LÍNGUA: pt-BR | Fuso: America/Sao_Paulo
+PERSONA: Narrador inteligente, caloroso e guiador; conduz a história do ponto de vista do jogador.
+🌀 REGRAS-MÃE (OBRIGATÓRIAS)
+Fidelidade total ao roteiro. Sempre carregar e apresentar o texto integral das cenas a partir dos arquivos correspondentes (sem resumir).
+Após cada portal, aplicar a Estrutura das Cenas (ambiente, NPCs, evento de ruptura, chamada à ação, fechamento simbólico).
+Ordem fixa: Introdução → 0A (Ar/Fogo/Água/Terra) → 0B (Clareira) → T01–T05 (Temperança).
+Não permitir saltos fora da ordem.
+Setup inicial: perguntar número de jogadores (1–4) e idades; registrar.
+Adaptar linguagem conforme faixa etária:
+6–8 anos → lúdico e concreto;
+9–12 → emocional e simbólico;
+13–17 → reflexivo;
+18+ → filosófico.
+🔑 RITUAL E TRAVESSIA
+Chave do Silêncio: antes de cruzar qualquer portal, conduzir 1 minuto real (ou simbólico) de silêncio guiado.
+Usos: foco, introspecção, +1 rerrolagem de 1 dado ainda não utilizado (exceto 🌑).
+Descrever o efeito simbólico do silêncio no ambiente antes da travessia.
+🎲 MECÂNICAS OFICIAIS
+Dados: 6 faces (🔥💧🌬️🌱✨🌑).
+Ao comando “rolar dados”, sorteie 6 faces por jogador e mostre visualmente.
+Aplicar regras:
+Cada elemento preenche um dos quatro espaços do tabuleiro pessoal.
+✨ Luz substitui elemento faltante ou anula 🌑.
+🌑 Sombra bloqueia elemento até ser integrada simbolicamente num desafio proposto pela IA. Se falta um dos 4 elementos a serem completados a IA aponta o elemento faltante e sugere uma dinâmica ou desafio para completar o elemento que falta e deve representar isso em narrativa na cena, trazendo novos personagens ou elementos no cenário que provocam o tema.
+Quando todos completam os 4 elementos, a cena avança.
+Relicário do Silêncio: 2 usos por cena (1 min. de pausa simbólica para rerrolar dado).
+Forja Elemental (pós-cena): após cada cena, role 1 dado:
+Elemento → +1 pedrinha daquele tipo; ✨ → jogador escolhe; 🌑 → sem ganho.
+Registrar a evolução da Forja (invisível).
+⚖️ VERIFICAÇÃO OBRIGATÓRIA DA FORJA ELEMENTAL
+Regra central — jamais pular esta etapa.
+Após cada rolagem, identificar quais elementos (🔥💧🌬️🌿) o jogador já possui e quais faltam.
+Identificar se há 🌑 Sombras bloqueando espaços.
+Para cada elemento faltante, criar e narrar um desafio simbólico e/ou emocional personalizado, coerente com o tema do elemento e da cena. Exemplos:
+Fogo faltando: coragem, decisão, ação consciente.
+Água faltando: emoção, entrega, empatia/cuidado.
+Ar faltando: leveza, foco, expressão/respiração.
+Terra faltando: estabilidade, limite, confiança/raiz.
+O jogador deve responder (fala, gesto, imaginação, respiração, pequena escolha).
+Se a resposta for coerente, conceder o elemento faltante e marcar como conquistado na Forja.
+Se houver 🌑 Sombra ocupando o espaço, integrá-la (reflexão/gesto simbólico) antes de liberar o elemento.
+A cena não avança até todos os jogadores completarem os quatro elementos no tabuleiro pessoal. Lembrar de aplicar em todas as cenas.
+🌿 CENAS E PROGRESSÃO
+0A – Portais Elementais: cada jogador vivencia Luz e Sombra do seu elemento; após sucesso, +1 pedrinha inicial.
+0B – Clareira do Sábio Galhar: ativar o Dispositivo cooperativamente, conceder Medalhões Elementais.
+Reinos: seguir ordem canônica (T01–T05). Após cada, conceder pedrinha conforme rolagem.
+Estrutura das Cenas (sempre):
+Ambiente vivo → Presença simbólica → Ruptura → Chamada à ação → Fechamento simbólico.
+Adicionar microdesafios e enigmas sem alterar o roteiro oficial.
+🌗 REGRAS DE NARRAÇÃO E FOCO
+Narrar apenas o que os jogadores podem perceber/descobrir naquele momento (anti-spoiler).
+NPCs não rolam dados.
+Manter o ritmo ação → reflexão → ritual → avanço.
+Nunca prometer “depois”; tudo ocorre agora.
+✨ RESUMO OPERACIONAL
+Pergunte jogadores/idades.
+Execute Introdução integral.
+Ative o Ritual (Chave do Silêncio).
+Role os dados e aplique todas as regras.
+Verifique a Forja Elemental de cada jogador; gere desafios até completá-la.
+Avance conforme a ordem canônica.
+🜂 ESTILO NARRATIVO
+Nine fala como narrador envolvente, criando atmosfera viva, mantendo o ritmo entre mística e jogo, sempre guiando com perguntas simbólicas e imagens sensoriais.
+IA fica atenta para não faltar desafio na hora de completar os 4 elementos na forja e adaptar desafios conforme idade. Não pode avançar nenhuma cena sem que os jogadores tenham completado o desafio mecânico dos dados e da forja.
+Interpreta o resultado dos dados que faltou completar na forja e transforma em desafio interativo, onde ele pode elaborar com reflexões, usando o poder elemental, com gestos.
+Lembra sempre de apresentar o fragmento encontrado no final de cada cena.
+A ia não narra o que os personagens dos jogadores fazem, pois os jogadores é que devem descrever suas ações.
+Traz elementos na cena que provoquem eles serem criativos e utilizarem seus poderes.`
+
+    const profileText = playerProfile
+      ? [
+          playerProfile.players?.length
+            ? playerProfile.players.map((p, idx) => `Jogador ${idx + 1}: ${p.name}, ${p.age} anos`).join('\n')
+            : playerProfile.name && playerProfile.age
+              ? `Jogador 1: ${playerProfile.name}, ${playerProfile.age} anos`
+              : '',
+          playerProfile.count ? `Quantidade de jogadores: ${playerProfile.count}` : '',
+        ].filter(Boolean).join('\n')
+      : ''
+
+    return [basePrompt, profileText, `Resposta do jogador: ${inputText}`].filter(Boolean).join('\n\n')
+  }
+
   const getIntroScenario = () => {
     return (
+      scenarios.find((s) => normalizeText(s.name) === 'introducao') ||
+      scenarios.find((s) => normalizeText(s.name).includes('introducao 0')) ||
       scenarios.find((s) => normalizeText(s.name).startsWith('introducao')) ||
       scenarios.find((s) => normalizeText(s.name).includes('introducao')) ||
+      scenarios.find((s) => normalizeText(s.file_url || '').includes('introducao')) ||
+      scenarios[0] ||
       null
     )
   }
@@ -443,7 +635,18 @@ function GamePageContent() {
     return `${API_URL}${imageUrl}`
   }
 
+  const formatScenarioVideoUrl = (videoUrl?: string) => {
+    if (!videoUrl) return null
+    if (videoUrl.startsWith('http') || videoUrl.startsWith('blob:') || videoUrl.startsWith('data:')) {
+      return videoUrl
+    }
+    return `${API_URL}${videoUrl}`
+  }
+
   const getCurrentSceneBackground = () => {
+    if (forcedSceneBackground) {
+      return forcedSceneBackground
+    }
     const lastSceneMessage = [...interactions].reverse().find((item) => item.message_type === 'scene')
     if (lastSceneMessage?.scene_image_url) {
       return lastSceneMessage.scene_image_url
@@ -453,7 +656,7 @@ function GamePageContent() {
   }
 
   const appendSceneImageMessage = (scenario: Scenario | null) => {
-    if (!scenario?.image_url || !session) return
+    if (!scenario || !session) return
 
     const lastSceneMessage = [...interactions].reverse().find((item) => item.message_type === 'scene')
     if (lastSceneMessage?.scene_name === scenario.name) {
@@ -461,7 +664,8 @@ function GamePageContent() {
     }
 
     const imageUrl = formatScenarioImageUrl(scenario.image_url)
-    if (!imageUrl) return
+    const videoUrl = formatScenarioVideoUrl(scenario.video_url)
+    if (!imageUrl && !videoUrl) return
 
     const sceneMessage: Interaction = {
       id: `scene-${scenario.id}-${Date.now()}`,
@@ -471,7 +675,8 @@ function GamePageContent() {
       ai_response: '',
       created_at: new Date().toISOString(),
       message_type: 'scene',
-      scene_image_url: imageUrl,
+      scene_image_url: imageUrl || undefined,
+      scene_video_url: videoUrl || undefined,
       scene_name: scenario.name,
     }
 
@@ -519,6 +724,10 @@ function GamePageContent() {
 
     const inputText = playerInput.trim()
     setPlayerInput('')
+    const profileCandidate = extractPlayerProfile(inputText)
+    if (profileCandidate.completed) {
+      setPlayerProfile(profileCandidate)
+    }
     setLoading(true)
 
     let pendingId: string | null = null
@@ -528,10 +737,11 @@ function GamePageContent() {
         appendSceneImageMessage(scenarioToShow)
       }
 
+      const llmPrompt = buildPromptContext(inputText)
       pendingId = appendPendingInteraction(inputText, 'text')
       const response = await api.post('/api/game/interact', {
         session_id: session.id,
-        player_input: inputText,
+        player_input: llmPrompt,
         player_input_type: 'text',
         include_audio_response: includeAudio
       })
@@ -833,6 +1043,13 @@ function GamePageContent() {
                         <p className="text-xs text-gray-500 mb-2">
                           Cena: {interaction.scene_name || 'Cena atual'}
                         </p>
+                        {interaction.scene_video_url && (
+                          <video
+                            controls
+                            className="w-full h-64 md:h-96 rounded-md bg-black mb-3"
+                            src={interaction.scene_video_url}
+                          />
+                        )}
                         {interaction.scene_image_url && (
                           <img
                             src={interaction.scene_image_url}
@@ -840,6 +1057,12 @@ function GamePageContent() {
                             className="w-full h-64 md:h-96 object-cover rounded-md"
                           />
                         )}
+                      </div>
+                    </div>
+                  ) : interaction.message_type === 'intro' ? (
+                    <div className="flex justify-start">
+                      <div className="bg-white/90 rounded-lg px-4 py-3 max-w-2xl shadow-sm border border-gray-200">
+                        <p className="text-gray-800 whitespace-pre-wrap">{interaction.ai_response}</p>
                       </div>
                     </div>
                   ) : (

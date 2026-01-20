@@ -16,18 +16,23 @@ class FileService:
         # Diretório para imagens de cenários
         self.scenario_images_dir = Path(os.getenv("SCENARIO_IMAGES_DIR", "./scenario_images"))
         self.scenario_images_dir.mkdir(parents=True, exist_ok=True)
+        # Diretório para vídeos de cenários
+        self.scenario_videos_dir = Path(os.getenv("SCENARIO_VIDEOS_DIR", "./scenario_videos"))
+        self.scenario_videos_dir.mkdir(parents=True, exist_ok=True)
         # Diretório para arquivos de elementos do jogo (regras/mecânicas/etc.)
         self.rule_files_dir = Path(os.getenv("RULE_FILES_DIR", "./rule_files"))
         self.rule_files_dir.mkdir(parents=True, exist_ok=True)
     
     async def save_uploaded_file(self, file_data: bytes, filename: str, file_type: str = "scenario") -> str:
         """Salva arquivo enviado e retorna o caminho
-        file_type: 'scenario', 'game_cover', 'scenario_image' ou 'rule_file'
+        file_type: 'scenario', 'game_cover', 'scenario_image', 'scenario_video' ou 'rule_file'
         """
         if file_type == "game_cover":
             file_path = self.game_covers_dir / filename
         elif file_type == "scenario_image":
             file_path = self.scenario_images_dir / filename
+        elif file_type == "scenario_video":
+            file_path = self.scenario_videos_dir / filename
         elif file_type == "rule_file":
             file_path = self.rule_files_dir / filename
         else:
@@ -75,13 +80,15 @@ class FileService:
     
     def get_file_url(self, file_path: str, file_type: str = "scenario") -> str:
         """Retorna URL relativa para acessar o arquivo
-        file_type: 'scenario', 'game_cover', 'scenario_image' ou 'rule_file'
+        file_type: 'scenario', 'game_cover', 'scenario_image', 'scenario_video' ou 'rule_file'
         """
         filename = Path(file_path).name
         if file_type == "game_cover":
             return f"/api/admin/games/covers/{filename}"
         if file_type == "scenario_image":
             return f"/api/admin/scenarios/images/{filename}"
+        if file_type == "scenario_video":
+            return f"/api/admin/scenarios/videos/{filename}"
         if file_type == "rule_file":
             return f"/api/admin/rules/files/{filename}"
         return f"/api/admin/scenarios/files/{filename}"

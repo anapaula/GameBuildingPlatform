@@ -56,6 +56,7 @@ interface Scenario {
   name: string
   description?: string
   image_url?: string
+  video_url?: string
   phase: number
   order: number
 }
