@@ -100,6 +100,8 @@ function GamePageContent() {
     age?: number
     players?: Array<{ name: string; age: number }>
   } | null>(null)
+  const [sceneSegments, setSceneSegments] = useState<Record<number, string[]>>({})
+  const [sceneProgress, setSceneProgress] = useState<Record<number, number>>({})
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -375,12 +377,14 @@ function GamePageContent() {
     }
 
     if (scenario.file_content) {
+      const segments = ensureSceneSegments(scenario)
+      setSceneProgressIndex(scenario.id, 1)
       messages.push({
         id: `intro-${scenario.id}-${Date.now()}`,
         session_id: sessionId,
         player_input: '',
         player_input_type: 'intro',
-        ai_response: scenario.file_content,
+        ai_response: segments[0] || scenario.file_content,
         created_at: new Date().toISOString(),
         message_type: 'intro',
       })
@@ -393,6 +397,7 @@ function GamePageContent() {
       list.find((s) => normalizeText(s.name) === 'introducao') ||
       list.find((s) => normalizeText(s.name).startsWith('introducao')) ||
       list.find((s) => normalizeText(s.name).includes('introducao')) ||
+      list.find((s) => normalizeText(s.file_url || '').includes('introducao0')) ||
       list.find((s) => normalizeText(s.file_url || '').includes('introducao')) ||
       list[0] ||
       null
@@ -417,7 +422,22 @@ function GamePageContent() {
           return
         }
       }
-      setInteractions(history.reverse()) // Ordenar do mais antigo para o mais recente
+      const ordered = history.reverse()
+      setInteractions(ordered) // Ordenar do mais antigo para o mais recente
+
+      const list = scenariosOverride && scenariosOverride.length > 0 ? scenariosOverride : scenarios
+      const introScenario = getIntroStartScenario(list)
+      const hasIntroMessage = ordered.some((item: Interaction) => item.message_type === 'intro')
+      if (introScenario && !hasIntroMessage) {
+        if (!forcedSceneBackground) {
+          const introImageUrl = formatScenarioImageUrl(introScenario.image_url)
+          if (introImageUrl) {
+            setForcedSceneBackground(introImageUrl)
+          }
+        }
+        setCurrentScenarioId((current) => current ?? introScenario.id)
+        setInteractions((prev) => [...prev, ...buildIntroMessages(introScenario, sessionId)])
+      }
     } catch (error: any) {
       console.error('Erro ao carregar histórico:', error)
     }
@@ -433,6 +453,45 @@ function GamePageContent() {
   const normalizeText = (text: string) => {
     if (!text) return ''
     return text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  }
+
+  const buildSceneSegments = (content: string) => {
+    if (!content) return []
+    const segments: string[] = []
+    let startIndex = 0
+    const questionRegex = /\?\s*/g
+    let match: RegExpExecArray | null
+    while ((match = questionRegex.exec(content)) !== null) {
+      const endIndex = match.index + match[0].length
+      const chunk = content.slice(startIndex, endIndex).trim()
+      if (chunk) {
+        segments.push(chunk)
+      }
+      startIndex = endIndex
+    }
+    const tail = content.slice(startIndex).trim()
+    if (tail) {
+      segments.push(tail)
+    }
+    return segments
+  }
+
+  const ensureSceneSegments = (scenario: Scenario) => {
+    if (!scenario.file_content) return []
+    if (sceneSegments[scenario.id]) {
+      return sceneSegments[scenario.id]
+    }
+    const segments = buildSceneSegments(scenario.file_content)
+    setSceneSegments((prev) => ({ ...prev, [scenario.id]: segments }))
+    return segments
+  }
+
+  const getSceneProgress = (sceneId: number) => {
+    return sceneProgress[sceneId] ?? 0
+  }
+
+  const setSceneProgressIndex = (sceneId: number, index: number) => {
+    setSceneProgress((prev) => ({ ...prev, [sceneId]: index }))
   }
 
   const extractPlayerProfile = (text: string) => {
@@ -457,6 +516,18 @@ function GamePageContent() {
   }
 
   const buildPromptContext = (inputText: string) => {
+    const currentScenario = scenarios.find((s) => s.id === currentScenarioId)
+    const currentSceneName = currentScenario?.name || 'N/A'
+    let nextStart = ''
+    let nextEnd = ''
+    if (currentScenario?.file_content) {
+      const segments = ensureSceneSegments(currentScenario)
+      const index = getSceneProgress(currentScenario.id)
+      const nextSegment = segments[index] || ''
+      nextStart = nextSegment
+      nextEnd = nextSegment
+    }
+
     const basePrompt = `A LLM sempre recebe os dados de nome, idade e quantidade de jogadores como contexto antes de trazer a próxima cena do jogo. Dessa forma, ela mantém um diálogo educado sempre chamando o jogador pelo nome e com o tom de de comunicação adequado à idade do jogador ou jogadores. Se tiver mais de um jogador, sempre considere a idade do jogador mais novo para o tom da conversação.
 - Salve os dados de nome do jogador, idade e quantidade de jogadores, pois SEMPRE será utilizado como contexto da LLM.
 - Uma vez tendo recebido os dados de nome do jogador, idade e quantidade de jogadores, sempre os mantenha no contexto enviado para a LLM e de modo a apoiar a seleção das próximas cenas, que também dependerão de respostas dos jogadores. Essas respostas devem ser registradas para manter o fluxo e saber para qual ponto retornar no fluxo do jogo e portanto, também devem sempre ser enviadas como contexto para LLM.
@@ -468,6 +539,12 @@ function GamePageContent() {
 - A partir do arquivo de Cena 01-Temperança, siga em ordem crescente de cenas, ou seja, Cena 02 - Temperança, Cena 03 - Temperança, etc.
 - Todas as cenas do jogo são selecionadas de acordo com a resposta do jogador. Uma vez tendo entrado num arquivo de cena só mude para a próxima cena quando passar por todo o fluxo da cena.
 - Sempre que for apresentar conteúdo de uma cena traga a imagem e/ou vídeo associada a esta cena no chat.
+
+Percepção → Memória → Decisão → Ação → Feedback
+Dados do ambiente:
+- Cena atual: ${currentSceneName}
+- Próximo ponto de início: ${nextStart || 'N/A'}
+- Próximo ponto de fim: ${nextEnd || 'N/A'}
 
 LÍNGUA: pt-BR | Fuso: America/Sao_Paulo
 PERSONA: Narrador inteligente, caloroso e guiador; conduz a história do ponto de vista do jogador.
@@ -655,6 +732,15 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
     return formatScenarioImageUrl(currentScenario?.image_url || undefined)
   }
 
+  useEffect(() => {
+    if (forcedSceneBackground || !currentScenarioId) return
+    const currentScenario = scenarios.find((s) => s.id === currentScenarioId)
+    const imageUrl = formatScenarioImageUrl(currentScenario?.image_url || undefined)
+    if (imageUrl) {
+      setForcedSceneBackground(imageUrl)
+    }
+  }, [forcedSceneBackground, currentScenarioId, scenarios.length])
+
   const appendSceneImageMessage = (scenario: Scenario | null) => {
     if (!scenario || !session) return
 
@@ -681,6 +767,41 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
     }
 
     setInteractions((prev) => [...prev, sceneMessage])
+    setCurrentScenarioId(scenario.id)
+  }
+
+  const insertSceneMediaBeforePending = (pendingId: string | null, scenario: Scenario | null) => {
+    if (!pendingId || !scenario || !session) return
+    setInteractions((prev) => {
+      const pendingIndex = prev.findIndex((item) => item.id === pendingId)
+      if (pendingIndex === -1) return prev
+
+      const lastSceneMessage = [...prev].reverse().find((item) => item.message_type === 'scene')
+      if (lastSceneMessage?.scene_name === scenario.name) {
+        return prev
+      }
+
+      const imageUrl = formatScenarioImageUrl(scenario.image_url)
+      const videoUrl = formatScenarioVideoUrl(scenario.video_url)
+      if (!imageUrl && !videoUrl) return prev
+
+      const sceneMessage: Interaction = {
+        id: `scene-${scenario.id}-${Date.now()}`,
+        session_id: session.id,
+        player_input: '',
+        player_input_type: 'scene',
+        ai_response: '',
+        created_at: new Date().toISOString(),
+        message_type: 'scene',
+        scene_image_url: imageUrl || undefined,
+        scene_video_url: videoUrl || undefined,
+        scene_name: scenario.name,
+      }
+
+      const next = [...prev]
+      next.splice(pendingIndex, 0, sceneMessage)
+      return next
+    })
     setCurrentScenarioId(scenario.id)
   }
 
@@ -732,27 +853,25 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
 
     let pendingId: string | null = null
     try {
-      if (scenarios.length > 0) {
-        const scenarioToShow = resolveScenarioForInput(inputText)
-        appendSceneImageMessage(scenarioToShow)
-      }
-
-      const llmPrompt = buildPromptContext(inputText)
       pendingId = appendPendingInteraction(inputText, 'text')
       const response = await api.post('/api/game/interact', {
         session_id: session.id,
-        player_input: llmPrompt,
+        player_input: inputText,
         player_input_type: 'text',
         include_audio_response: includeAudio
       })
 
       const newInteraction = response.data
-      replacePendingInteraction(pendingId, newInteraction)
       
       // Atualizar sessão
       const sessionResponse = await api.get(`/api/sessions/${session.id}`)
-      setSession(sessionResponse.data)
-      setCurrentScenarioId(sessionResponse.data.current_scenario_id || currentScenarioId)
+      const updatedSession = sessionResponse.data
+      setSession(updatedSession)
+      setCurrentScenarioId(updatedSession.current_scenario_id || currentScenarioId)
+
+      const scenarioToShow = scenarios.find((scenario) => scenario.id === updatedSession.current_scenario_id) || null
+      insertSceneMediaBeforePending(pendingId, scenarioToShow)
+      replacePendingInteraction(pendingId, newInteraction)
 
       toast.success('Resposta recebida!')
     } catch (error: any) {
@@ -809,11 +928,6 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
     setLoading(true)
     let pendingId: string | null = null
     try {
-      if (scenarios.length > 0) {
-        const scenarioToShow = resolveScenarioForInput('audio')
-        appendSceneImageMessage(scenarioToShow)
-      }
-
       pendingId = appendPendingInteraction('Mensagem de voz enviada.', 'audio')
       const formData = new FormData()
       formData.append('audio_file', audioBlob, 'audio.webm')
@@ -827,11 +941,15 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
       })
 
       const newInteraction = response.data
-      replacePendingInteraction(pendingId, newInteraction)
 
       const sessionResponse = await api.get(`/api/sessions/${session.id}`)
-      setSession(sessionResponse.data)
-      setCurrentScenarioId(sessionResponse.data.current_scenario_id || currentScenarioId)
+      const updatedSession = sessionResponse.data
+      setSession(updatedSession)
+      setCurrentScenarioId(updatedSession.current_scenario_id || currentScenarioId)
+
+      const scenarioToShow = scenarios.find((scenario) => scenario.id === updatedSession.current_scenario_id) || null
+      insertSceneMediaBeforePending(pendingId, scenarioToShow)
+      replacePendingInteraction(pendingId, newInteraction)
 
       toast.success('Áudio processado!')
     } catch (error: any) {

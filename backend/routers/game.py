@@ -219,6 +219,145 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
             query = query.limit(limit)
         return query.all()
 
+    def _sanitize_scene_text(content: str) -> str:
+        if not content:
+            return ""
+        lines: List[str] = []
+        skip_block = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                if not skip_block:
+                    lines.append(line)
+                continue
+            normalized = _norm(stripped)
+            if normalized.startswith("nao exibir ao jogador"):
+                skip_block = True
+                continue
+            if skip_block:
+                continue
+            if normalized.startswith("a partir daqui") or normalized.startswith("a ia ") or normalized.startswith("se for "):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    def _split_scene_segments(content: str) -> List[str]:
+        if not content:
+            return []
+        content = _sanitize_scene_text(content)
+        if not content:
+            return []
+        segments: List[str] = []
+        current: List[str] = []
+        question_seen = False
+        for line in content.splitlines():
+            if question_seen and "?" in line:
+                chunk = "\n".join(current).strip()
+                if chunk:
+                    segments.append(chunk)
+                current = [line]
+                question_seen = "?" in line
+                continue
+            current.append(line)
+            if "?" in line:
+                question_seen = True
+        if current:
+            chunk = "\n".join(current).strip()
+            if chunk:
+                segments.append(chunk)
+        return segments
+
+    def _get_scene_segments(scene: Optional[Scenario]) -> List[str]:
+        if not scene or not scene.file_content:
+            return []
+        return _split_scene_segments(scene.file_content)
+
+    def _is_intro_scene(scene: Scenario) -> bool:
+        return _norm(scene.name).startswith(_norm("Introdução")) or _norm(scene.name).startswith(_norm("Introducao"))
+
+    def _portal_scene_for_element(element: Optional[str]) -> Optional[Scenario]:
+        if not element:
+            return None
+        targets = [
+            f"Cena 0A - Portal da {element}",
+            f"Cena 0A - Portal do {element}",
+            f"Portal da {element}",
+            f"Portal do {element}",
+        ]
+        for target in targets:
+            scene = _scene_by_contains(target)
+            if scene:
+                return scene
+        return None
+
+    def _next_scene_by_order(scene: Scenario) -> Optional[Scenario]:
+        current_name = _norm(scene.name)
+        if current_name.startswith(_norm("Cena 0A")):
+            return _scene_by_prefix("Cena 0B")
+        if current_name.startswith(_norm("Cena 0B")):
+            return _scene_by_prefix("Cena 01 - Temperança") or _scene_by_prefix("Cena 01")
+        match = re.search(r"cena\s*(\d{2})", current_name)
+        if match:
+            current_number = int(match.group(1))
+            next_number = current_number + 1
+            return _scene_by_prefix(f"Cena {next_number:02d}")
+        return None
+
+    def _consume_segment_index(index: int, segments: List[str]) -> int:
+        if segments and index < len(segments):
+            return index + 1
+        return index
+
+    def _advance_state_for_input(scene: Optional[Scenario], index: int, player_input: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "scene": scene,
+            "index": index,
+            "scene_changed": False,
+            "decision_reason": "manter_cena",
+            "element": _selected_element(player_input),
+        }
+        if not scene:
+            return result
+        segments = _get_scene_segments(scene)
+        if _is_intro_scene(scene) and result["element"]:
+            portal_scene = _portal_scene_for_element(result["element"])
+            if portal_scene:
+                scene = portal_scene
+                index = 0
+                segments = _get_scene_segments(scene)
+                result.update({
+                    "scene": scene,
+                    "index": index,
+                    "scene_changed": True,
+                    "decision_reason": "selecionou_elemento",
+                })
+        if not result["scene_changed"] and index >= len(segments):
+            next_scene = _next_scene_by_order(scene)
+            if next_scene:
+                scene = next_scene
+                index = 0
+                segments = _get_scene_segments(scene)
+                result.update({
+                    "scene": scene,
+                    "index": index,
+                    "scene_changed": True,
+                    "decision_reason": "fim_da_cena",
+                })
+        result["segments"] = segments
+        result["next_segment"] = segments[index] if index < len(segments) else ""
+        return result
+
+    def _simulate_state(interactions: List[SessionInteraction], base_scene: Optional[Scenario]) -> Dict[str, Any]:
+        scene = base_scene
+        index = 0
+        for interaction in interactions:
+            decision = _advance_state_for_input(scene, index, interaction.player_input or "")
+            scene = decision["scene"]
+            segments = decision.get("segments") or _get_scene_segments(scene)
+            index = decision["index"]
+            index = _consume_segment_index(index, segments)
+        return {"scene": scene, "index": index}
+
     def _scene_by_prefix(prefix: str) -> Optional[Scenario]:
         for scenario in scenarios:
             if _norm(scenario.name).startswith(_norm(prefix)):
@@ -253,7 +392,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
         current_scenario = db.query(Scenario).filter(Scenario.id == session.current_scenario_id).first()
 
     intro_scene = _scene_by_prefix("Introdução") or _scene_by_contains("Introducao")
-    if is_first_interaction or not current_scenario:
+    if False and (is_first_interaction or not current_scenario):
         if intro_scene:
             session.current_scenario_id = intro_scene.id
             current_scenario = intro_scene
@@ -261,7 +400,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
             current_scenario = scenarios[0]
 
     # Fluxo determinístico baseado na seleção do elemento e ordem das cenas
-    if current_scenario and intro_scene and current_scenario.id == intro_scene.id:
+    if False and current_scenario and intro_scene and current_scenario.id == intro_scene.id:
         element = _selected_element(interaction_data.player_input or "")
         if element:
             portal_scene = _scene_by_prefix(f"Cena 0A - Portal") and _scene_by_contains(f"Portal da {element}")
@@ -270,7 +409,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
             if portal_scene:
                 session.current_scenario_id = portal_scene.id
                 current_scenario = portal_scene
-    elif current_scenario and _is_completion(interaction_data.player_input or ""):
+    elif False and current_scenario and _is_completion(interaction_data.player_input or ""):
         current_name = _norm(current_scenario.name)
         if current_name.startswith(_norm("Cena 0A")):
             next_scene = _scene_by_prefix("Cena 0B")
@@ -292,6 +431,28 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
                     session.current_scenario_id = next_scene.id
                     current_scenario = next_scene
     
+    # Ciclo cognitivo do NPC (percepção -> memória -> decisão -> ação -> feedback)
+    base_scene = intro_scene or current_scenario or (scenarios[0] if scenarios else None)
+    if not base_scene:
+        raise HTTPException(status_code=400, detail="Nenhuma cena ativa encontrada para esta sessão.")
+
+    history_interactions = _get_recent_interactions()
+    simulated_state = _simulate_state(history_interactions, base_scene)
+    previous_scene = simulated_state.get("scene") or base_scene
+    segment_index = simulated_state.get("index", 0)
+
+    decision = _advance_state_for_input(previous_scene, segment_index, interaction_data.player_input or "")
+    decided_scene = decision.get("scene") or previous_scene
+    scene_changed = decision.get("scene_changed", False)
+    decision_reason = decision.get("decision_reason", "manter_cena")
+    element_selected = decision.get("element")
+    segments = decision.get("segments") or _get_scene_segments(decided_scene)
+    next_segment = decision.get("next_segment") or ""
+
+    if decided_scene and decided_scene.id:
+        session.current_scenario_id = decided_scene.id
+        current_scenario = decided_scene
+
     llm_service = LLMService(db)
     context = llm_service.build_game_context(session.id, current_scenario, game_rules)
     system_prompt = "Você é um assistente de jogo interativo. Responda em português do Brasil de forma envolvente e imersiva."
@@ -314,12 +475,6 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
         "\n- A partir do arquivo de Cena 01-Temperança, siga em ordem crescente de cenas, ou seja, Cena 02 - Temperança, Cena 03 - Temperança, etc."
         "\n- Todas as cenas do jogo são selecionadas de acordo com a resposta do jogador. Uma vez tendo entrado num arquivo de cena só mude para a próxima cena quando passar por todo o fluxo da cena."
     )
-    
-    # Se for a primeira interação, iniciar sempre pela cena "Introdução"
-    if is_first_interaction and current_scenario and current_scenario.file_content:
-        system_prompt += "\n\nINÍCIO DO JOGO - CENA INTRODUÇÃO:\n"
-        system_prompt += f"{current_scenario.file_content}\n\n"
-        system_prompt += "Apresente este conteúdo ao jogador de forma envolvente e natural, como se estivesse narrando o início da história. Adapte o texto para uma conversa interativa."
     
     def _rule_group(rule: GameRule) -> int:
         title = _norm(rule.title)
@@ -389,7 +544,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
                 if file_content:
                     system_prompt += f"\n\n{rule.title}:\n{file_content}"
 
-    recent_interactions = _get_recent_interactions()
+    recent_interactions = _get_recent_interactions(limit=8)
     if recent_interactions:
         system_prompt += "\n\nHISTÓRICO RECENTE DA SESSÃO (MANTER CONTEXTO):"
         for interaction in recent_interactions:
@@ -398,13 +553,41 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
             if interaction.ai_response:
                 system_prompt += f"\n- Narrador: {interaction.ai_response}"
 
-    if current_scenario and current_scenario.file_content:
-        system_prompt += f"\n\nCENA ATUAL:\n{current_scenario.name}\n{current_scenario.file_content}"
+    confidence = 0.4
+    if profile.get("count") or profile.get("players") or (profile.get("name") and profile.get("age")):
+        confidence += 0.2
+    if element_selected:
+        confidence += 0.2
+    if next_segment:
+        confidence += 0.1
+    if scene_changed:
+        confidence += 0.1
+    confidence = min(confidence, 0.99)
+
+    if current_scenario:
+        system_prompt += "\n\nCICLO COGNITIVO DO NPC:"
+        system_prompt += "\nPercepção:"
+        system_prompt += f"\n- Input do jogador: {interaction_data.player_input}"
+        system_prompt += f"\n- Ambiente: cena atual = {current_scenario.name}"
+        system_prompt += f"\n- Próximo ponto de início: {next_segment or 'N/A'}"
+        system_prompt += f"\n- Próximo ponto de fim: {next_segment or 'N/A'}"
+        system_prompt += "\nMemória:"
+        system_prompt += f"\n- Confiança: {confidence:.2f}"
+        system_prompt += "\nDecisão:"
+        system_prompt += f"\n- Cena atual: {current_scenario.name}"
+        if scene_changed:
+            system_prompt += f"\n- Transição aplicada: {decision_reason}"
+        if element_selected:
+            system_prompt += f"\n- Elemento identificado: {element_selected}"
+        system_prompt += "\nAção:"
+        system_prompt += "\n- Apresente apenas o trecho da cena correspondente ao próximo ponto de início/fim."
+        system_prompt += "\nFeedback:"
+        system_prompt += "\n- Responda ao jogador e finalize a interação para reiniciar o ciclo."
+
+    if current_scenario and next_segment:
+        system_prompt += f"\n\nTRECHO DA CENA ATUAL (APRESENTAR INTEGRALMENTE):\n{next_segment}"
     
-    # Se for primeira interação, modificar o prompt para incluir instrução de apresentar a introdução
     user_prompt = interaction_data.player_input
-    if is_first_interaction and current_scenario and current_scenario.file_content:
-        user_prompt = "Olá, quero começar a jogar. Por favor, me apresente o início da história."
     
     try:
         llm_response = await llm_service.generate_response(
