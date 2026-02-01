@@ -2,20 +2,26 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
-import { User, Invitation } from '@/types'
+import { Game, Invitation, User } from '@/types'
 import toast from 'react-hot-toast'
 import { Plus, Mail, Trash2, Edit2, X } from 'lucide-react'
 
 export default function FacilitatorsPage() {
   const [facilitators, setFacilitators] = useState<User[]>([])
   const [invitations, setInvitations] = useState<Invitation[]>([])
+  const [games, setGames] = useState<Game[]>([])
   const [loading, setLoading] = useState(true)
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
+  const [selectedGames, setSelectedGames] = useState<number[]>([])
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingFacilitator, setEditingFacilitator] = useState<User | null>(null)
+  const [editSelectedGames, setEditSelectedGames] = useState<number[]>([])
 
   useEffect(() => {
     fetchFacilitators()
     fetchInvitations()
+    fetchGames()
   }, [])
 
   const fetchFacilitators = async () => {
@@ -33,10 +39,29 @@ export default function FacilitatorsPage() {
   const fetchInvitations = async () => {
     try {
       const res = await api.get('/api/admin/facilitators/invitations')
-      setInvitations(res.data)
+      const data = (res.data || []).filter((inv: Invitation) => inv.role === 'FACILITATOR')
+      setInvitations(data)
     } catch (error) {
       console.error('Erro ao carregar convites:', error)
     }
+  }
+
+  const fetchGames = async () => {
+    try {
+      const res = await api.get('/api/admin/games')
+      setGames((res.data || []).filter((g: Game) => g.is_active))
+    } catch (error) {
+      console.error('Erro ao carregar jogos:', error)
+      toast.error('Erro ao carregar jogos')
+    }
+  }
+
+  const toggleGame = (gameId: number, selected: number[], setSelected: (ids: number[]) => void) => {
+    setSelected(
+      selected.includes(gameId)
+        ? selected.filter(id => id !== gameId)
+        : [...selected, gameId]
+    )
   }
 
   const handleInvite = async (e: React.FormEvent) => {
@@ -45,20 +70,57 @@ export default function FacilitatorsPage() {
       toast.error('E-mail é obrigatório')
       return
     }
+    if (selectedGames.length === 0) {
+      toast.error('Selecione pelo menos um jogo')
+      return
+    }
 
     try {
       toast.loading('Enviando convite...', { id: 'invite' })
       await api.post('/api/admin/facilitators/invite', {
         email: inviteEmail,
-        role: 'FACILITATOR'
+        role: 'FACILITATOR',
+        game_ids: selectedGames
       })
       toast.success('Convite enviado com sucesso!', { id: 'invite' })
       setShowInviteModal(false)
       setInviteEmail('')
+      setSelectedGames([])
       fetchInvitations()
     } catch (error: any) {
       console.error('Erro ao enviar convite:', error)
       toast.error(error.response?.data?.detail || 'Erro ao enviar convite', { id: 'invite' })
+    }
+  }
+
+  const handleEdit = async (facilitator: User) => {
+    setEditingFacilitator(facilitator)
+    try {
+      const accessRes = await api.get(`/api/admin/facilitators/${facilitator.id}/games`)
+      const accessIds = (accessRes.data || []).map((a: any) => a.game_id)
+      setEditSelectedGames(accessIds)
+    } catch (error) {
+      console.error('Erro ao carregar acessos do facilitador:', error)
+      setEditSelectedGames([])
+    }
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingFacilitator) return
+
+    try {
+      toast.loading('Atualizando acessos...', { id: 'update-facilitator' })
+      await api.put(`/api/admin/facilitators/${editingFacilitator.id}/games`, {
+        game_ids: editSelectedGames
+      })
+      toast.success('Acessos atualizados com sucesso!', { id: 'update-facilitator' })
+      setShowEditModal(false)
+      setEditingFacilitator(null)
+    } catch (error: any) {
+      console.error('Erro ao atualizar acessos:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao atualizar acessos', { id: 'update-facilitator' })
     }
   }
 
@@ -90,6 +152,10 @@ export default function FacilitatorsPage() {
     }
   }
 
+  const pendingInvitations = invitations.filter((inv) => inv.status === 'pending')
+  const acceptedInvitations = invitations.filter((inv) => inv.status === 'accepted')
+  const expiredInvitations = invitations.filter((inv) => inv.status === 'expired')
+
   if (loading) {
     return <div className="text-center py-12">Carregando...</div>
   }
@@ -100,7 +166,7 @@ export default function FacilitatorsPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Facilitadores</h1>
           <p className="mt-2 text-sm text-gray-600">
-            Gerencie facilitadores e seus convites
+            Gerencie facilitadores, convites e acessos a jogos
           </p>
         </div>
         <button
@@ -122,6 +188,7 @@ export default function FacilitatorsPage() {
                 onClick={() => {
                   setShowInviteModal(false)
                   setInviteEmail('')
+                  setSelectedGames([])
                 }}
                 className="text-gray-400 hover:text-gray-600"
               >
@@ -133,22 +200,53 @@ export default function FacilitatorsPage() {
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
                   E-mail
                 </label>
-                <input
-                  type="email"
-                  id="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="email@exemplo.com"
-                  required
-                />
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <input
+                    type="email"
+                    id="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="email@exemplo.com"
+                    required
+                  />
+                </div>
               </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Jogos que o facilitador terá acesso
+                </label>
+                <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-3">
+                  {games.length === 0 ? (
+                    <p className="text-gray-500 text-sm">Nenhum jogo disponível</p>
+                  ) : (
+                    games.map((game) => (
+                      <label
+                        key={game.id}
+                        className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedGames.includes(game.id)}
+                          onChange={() => toggleGame(game.id, selectedGames, setSelectedGames)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span className="text-sm text-gray-700">{game.title}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
                     setShowInviteModal(false)
                     setInviteEmail('')
+                    setSelectedGames([])
                   }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
@@ -200,9 +298,57 @@ export default function FacilitatorsPage() {
                     </div>
                     <div className="flex gap-2">
                       <button
+                        onClick={() => handleEdit(facilitator)}
+                        className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                        title="Editar acessos"
+                      >
+                        <Edit2 className="h-4 w-4" />
+                      </button>
+                      <button
                         onClick={() => handleDeleteFacilitator(facilitator.id)}
-                        className="text-red-600 hover:text-red-800"
+                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
                         title="Remover"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+
+      {/* Convites Pendentes */}
+      <div className="bg-white shadow overflow-hidden sm:rounded-md">
+        <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900">Convites Pendentes</h2>
+        </div>
+        <ul className="divide-y divide-gray-200">
+          {pendingInvitations.length === 0 ? (
+            <li className="px-4 py-5 sm:px-6">
+              <p className="text-gray-500 text-center">Nenhum convite pendente.</p>
+            </li>
+          ) : (
+            pendingInvitations.map((invitation) => (
+              <li key={invitation.id}>
+                <div className="px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Enviado em: {new Date(invitation.created_at).toLocaleString('pt-BR')}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                        Pendente
+                      </span>
+                      <button
+                        onClick={() => handleDeleteInvitation(invitation.id)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Remover convite"
                       >
                         <Trash2 className="h-5 w-5" />
                       </button>
@@ -215,51 +361,30 @@ export default function FacilitatorsPage() {
         </ul>
       </div>
 
-      {/* Lista de Convites */}
+      {/* Convites Aceitos */}
       <div className="bg-white shadow overflow-hidden sm:rounded-md">
         <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
-          <h2 className="text-lg font-medium text-gray-900">Convites Pendentes</h2>
+          <h2 className="text-lg font-medium text-gray-900">Convites Aceitos</h2>
         </div>
         <ul className="divide-y divide-gray-200">
-          {invitations.length === 0 ? (
+          {acceptedInvitations.length === 0 ? (
             <li className="px-4 py-5 sm:px-6">
-              <p className="text-gray-500 text-center">Nenhum convite pendente.</p>
+              <p className="text-gray-500 text-center">Nenhum convite aceito.</p>
             </li>
           ) : (
-            invitations.map((invitation) => (
+            acceptedInvitations.map((invitation) => (
               <li key={invitation.id}>
                 <div className="px-4 py-4 sm:px-6">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <div className="flex items-center">
-                        <Mail className="h-5 w-5 text-gray-400 mr-2" />
-                        <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
-                        <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          invitation.status === 'pending'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : invitation.status === 'accepted'
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {invitation.status === 'pending' ? 'Pendente' : invitation.status === 'accepted' ? 'Aceito' : 'Expirado'}
-                        </span>
-                      </div>
+                      <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
                       <p className="mt-1 text-xs text-gray-400">
-                        Criado em: {new Date(invitation.created_at).toLocaleString('pt-BR')}
-                        {invitation.expires_at && (
-                          <> • Expira em: {new Date(invitation.expires_at).toLocaleString('pt-BR')}</>
-                        )}
+                        Enviado em: {new Date(invitation.created_at).toLocaleString('pt-BR')}
                       </p>
                     </div>
-                    {invitation.status === 'pending' && (
-                      <button
-                        onClick={() => handleDeleteInvitation(invitation.id)}
-                        className="text-red-600 hover:text-red-800"
-                        title="Remover convite"
-                      >
-                        <Trash2 className="h-5 w-5" />
-                      </button>
-                    )}
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      Aceito
+                    </span>
                   </div>
                 </div>
               </li>
@@ -267,6 +392,101 @@ export default function FacilitatorsPage() {
           )}
         </ul>
       </div>
+
+      {/* Convites Expirados */}
+      <div className="bg-white shadow overflow-hidden sm:rounded-md">
+        <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+          <h2 className="text-lg font-medium text-gray-900">Convites Expirados</h2>
+        </div>
+        <ul className="divide-y divide-gray-200">
+          {expiredInvitations.length === 0 ? (
+            <li className="px-4 py-5 sm:px-6">
+              <p className="text-gray-500 text-center">Nenhum convite expirado.</p>
+            </li>
+          ) : (
+            expiredInvitations.map((invitation) => (
+              <li key={invitation.id}>
+                <div className="px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">{invitation.email}</p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Enviado em: {new Date(invitation.created_at).toLocaleString('pt-BR')}
+                      </p>
+                    </div>
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      Expirado
+                    </span>
+                  </div>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+      </div>
+
+      {/* Modal de Edição */}
+      {showEditModal && editingFacilitator && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900">Editar Facilitador</h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setEditingFacilitator(null)
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+            <form onSubmit={handleSaveEdit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Acesso aos jogos</label>
+                <div className="space-y-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md p-3">
+                  {games.length === 0 ? (
+                    <p className="text-gray-500 text-sm">Nenhum jogo disponível</p>
+                  ) : (
+                    games.map((game) => (
+                      <label
+                        key={game.id}
+                        className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-2 rounded"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={editSelectedGames.includes(game.id)}
+                          onChange={() => toggleGame(game.id, editSelectedGames, setEditSelectedGames)}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <span className="text-sm text-gray-700">{game.title}</span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+                >
+                  Salvar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    setEditingFacilitator(null)
+                  }}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
