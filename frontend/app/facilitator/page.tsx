@@ -166,20 +166,29 @@ export default function FacilitatorPage() {
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-3">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Meus Jogadores</h1>
               <p className="mt-2 text-sm text-gray-600">
                 Gerencie os jogadores que você convidou
               </p>
             </div>
-            <Link
-              href="/facilitator/invite"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Convidar Jogador
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/facilitator/games"
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+              >
+                <Gamepad2 className="h-4 w-4 mr-2" />
+                Jogar
+              </Link>
+              <Link
+                href="/facilitator/invite"
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Convidar Jogador
+              </Link>
+            </div>
           </div>
 
           <div className="bg-white shadow overflow-hidden sm:rounded-md">

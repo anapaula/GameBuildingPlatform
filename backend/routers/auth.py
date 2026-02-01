@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import timedelta, datetime, timezone
 
 from database import get_db
-from models import User, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, PlayerGameAccess, InvitationGame
+from models import User, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, PlayerGameAccess, InvitationGame, FacilitatorGameAccess
 from schemas import Token, UserCreate, UserResponse, RegisterWithInvitation
 from auth import (
     authenticate_user,
@@ -143,6 +143,18 @@ async def register_with_invitation(
                 granted_by=invitation.inviter_id
             )
             db.add(player_access)
+    elif invitation.role == UserRole.FACILITATOR:
+        invitation_games = db.query(InvitationGame).filter(
+            InvitationGame.invitation_id == invitation.id
+        ).all()
+
+        for inv_game in invitation_games:
+            facilitator_access = FacilitatorGameAccess(
+                facilitator_id=db_user.id,
+                game_id=inv_game.game_id,
+                granted_by=invitation.inviter_id
+            )
+            db.add(facilitator_access)
     
     # Marcar convite como aceito
     invitation.status = InvitationStatus.ACCEPTED

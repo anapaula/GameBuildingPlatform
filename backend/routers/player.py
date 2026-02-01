@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from database import get_db
-from models import User, Game, PlayerGameAccess, UserRole, Room, RoomMember, GameSession, SessionInteraction
+from models import User, Game, PlayerGameAccess, UserRole, Room, RoomMember, GameSession, SessionInteraction, FacilitatorGameAccess
 from schemas import GameResponse, RoomResponse
 from auth import get_current_active_user
 
@@ -14,9 +14,23 @@ async def get_available_games(
     current_user: User = Depends(get_current_active_user)
 ):
     """Retorna os jogos disponíveis para o jogador atual"""
-    # Admin e facilitadores veem todos os jogos
-    if current_user.role in [UserRole.ADMIN, UserRole.FACILITATOR]:
+    # Admin vê todos os jogos
+    if current_user.role == UserRole.ADMIN:
         games = db.query(Game).filter(Game.is_active == True).all()
+        return games
+
+    # Facilitadores veem apenas jogos aos quais têm acesso
+    if current_user.role == UserRole.FACILITATOR:
+        accesses = db.query(FacilitatorGameAccess).filter(
+            FacilitatorGameAccess.facilitator_id == current_user.id
+        ).all()
+        game_ids = [access.game_id for access in accesses]
+        if not game_ids:
+            return []
+        games = db.query(Game).filter(
+            Game.id.in_(game_ids),
+            Game.is_active == True
+        ).all()
         return games
     
     # Jogadores veem apenas os jogos aos quais têm acesso
@@ -26,55 +40,9 @@ async def get_available_games(
     
     game_ids = [access.game_id for access in accesses]
     
-    # Se o jogador não tem acesso a nenhum jogo, verificar se há jogos ativos
-    # e dar acesso automático a todos os jogos ativos
+    # Se o jogador não tem acesso a nenhum jogo, não associar automaticamente
     if not game_ids:
-        # Buscar todos os jogos ativos
-        all_active_games = db.query(Game).filter(Game.is_active == True).all()
-        
-        if all_active_games:
-            # Buscar um admin ou facilitador para usar como granted_by
-            # Priorizar admin, depois facilitador
-            admin_user = db.query(User).filter(
-                User.role == UserRole.ADMIN,
-                User.is_active == True
-            ).first()
-            
-            if not admin_user:
-                admin_user = db.query(User).filter(
-                    User.role == UserRole.FACILITATOR,
-                    User.is_active == True
-                ).first()
-            
-            # Se não houver admin ou facilitador, usar o próprio jogador
-            granted_by_id = admin_user.id if admin_user else current_user.id
-            
-            # Criar acessos automáticos para todos os jogos ativos
-            for game in all_active_games:
-                # Verificar se já existe acesso (evitar duplicatas)
-                existing_access = db.query(PlayerGameAccess).filter(
-                    PlayerGameAccess.player_id == current_user.id,
-                    PlayerGameAccess.game_id == game.id
-                ).first()
-                
-                if not existing_access:
-                    new_access = PlayerGameAccess(
-                        player_id=current_user.id,
-                        game_id=game.id,
-                        granted_by=granted_by_id
-                    )
-                    db.add(new_access)
-            
-            db.commit()
-            
-            # Buscar novamente os acessos após criar
-            accesses = db.query(PlayerGameAccess).filter(
-                PlayerGameAccess.player_id == current_user.id
-            ).all()
-            game_ids = [access.game_id for access in accesses]
-        else:
-            # Não há jogos ativos no sistema
-            return []
+        return []
     
     games = db.query(Game).filter(
         Game.id.in_(game_ids),
@@ -117,7 +85,8 @@ async def get_player_rooms_by_game(
     # Buscar salas ativas
     rooms = db.query(Room).filter(
         Room.id.in_(room_ids),
-        Room.is_active == True
+        Room.is_active == True,
+        Room.game_id == game_id
     ).all()
     
     # Para cada sala, buscar sessões do jogador neste jogo

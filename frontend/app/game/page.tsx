@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -32,6 +32,12 @@ interface GameSession {
   llm_model?: string
   created_at: string
   last_activity: string
+}
+
+interface RollOrderInfo {
+  order: Array<{ slot: number; name: string }>
+  current: { slot: number; name: string }
+  next: { slot: number; name: string }
 }
 
 interface Interaction {
@@ -67,8 +73,9 @@ interface Scenario {
   order: number
 }
 
-function GamePageContent() {
+export function GamePageContent() {
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
   const { user, isAuthenticated, token, _hasHydrated, logout } = useAuthStore()
   const [authChecked, setAuthChecked] = useState(false)
@@ -102,6 +109,7 @@ function GamePageContent() {
   } | null>(null)
   const [sceneSegments, setSceneSegments] = useState<Record<number, string[]>>({})
   const [sceneProgress, setSceneProgress] = useState<Record<number, number>>({})
+  const [rollOrderInfo, setRollOrderInfo] = useState<RollOrderInfo | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -194,6 +202,7 @@ function GamePageContent() {
           setCurrentScenarioId(session.current_scenario_id || null)
           const loadedScenarios = await loadScenarios(session.game_id)
           await loadHistory(session.id, loadedScenarios)
+          await loadRollOrderInfo(session.id)
           return
         } catch (error: any) {
           console.error('Erro ao carregar sessão:', error)
@@ -207,15 +216,21 @@ function GamePageContent() {
       const sessionsResponse = await api.get('/api/sessions/')
       const sessions = sessionsResponse.data || []
       
-      // Se há roomId na URL, filtrar sessões por sala
-      let activeSession = null
-      if (urlRoomId) {
-        const roomId = parseInt(urlRoomId)
-        activeSession = sessions.find((s: GameSession) => 
-          s.status === 'active' && s.room_id === roomId
-        )
-      } else {
-        activeSession = sessions.find((s: GameSession) => s.status === 'active')
+      // Se há roomId na URL, buscar sessão ativa ou pausada mais recente
+      let activeSession: GameSession | null = null
+      const candidates = urlRoomId
+        ? sessions.filter((s: GameSession) => s.room_id === parseInt(urlRoomId))
+        : sessions
+      if (candidates.length) {
+        const sorted = [...candidates].sort((a, b) => {
+          const statusScore = (status: string) => (status === 'active' ? 2 : status === 'paused' ? 1 : 0)
+          const scoreDiff = statusScore(b.status) - statusScore(a.status)
+          if (scoreDiff !== 0) return scoreDiff
+          const aTime = new Date(a.last_activity || a.created_at).getTime()
+          const bTime = new Date(b.last_activity || b.created_at).getTime()
+          return bTime - aTime
+        })
+        activeSession = sorted.find((s) => s.status === 'active' || s.status === 'paused') || null
       }
       
       if (!activeSession) {
@@ -275,6 +290,7 @@ function GamePageContent() {
       const loadedScenarios = await loadScenarios(activeSession.game_id)
       // Carregar histórico
       await loadHistory(activeSession.id, loadedScenarios)
+      await loadRollOrderInfo(activeSession.id)
     } catch (error: any) {
       console.error('Erro ao inicializar jogo:', error)
       toast.error('Erro ao carregar jogo. Tente novamente.')
@@ -343,6 +359,7 @@ function GamePageContent() {
       
       // Carregar histórico
       await loadHistory(activeSession.id, loadedScenarios)
+      await loadRollOrderInfo(activeSession.id)
     } catch (error: any) {
       console.error('Erro ao criar sessão:', error)
       toast.error(error.response?.data?.detail || 'Erro ao criar sessão')
@@ -424,22 +441,17 @@ function GamePageContent() {
       }
       const ordered = history.reverse()
       setInteractions(ordered) // Ordenar do mais antigo para o mais recente
-
-      const list = scenariosOverride && scenariosOverride.length > 0 ? scenariosOverride : scenarios
-      const introScenario = getIntroStartScenario(list)
-      const hasIntroMessage = ordered.some((item: Interaction) => item.message_type === 'intro')
-      if (introScenario && !hasIntroMessage) {
-        if (!forcedSceneBackground) {
-          const introImageUrl = formatScenarioImageUrl(introScenario.image_url)
-          if (introImageUrl) {
-            setForcedSceneBackground(introImageUrl)
-          }
-        }
-        setCurrentScenarioId((current) => current ?? introScenario.id)
-        setInteractions((prev) => [...prev, ...buildIntroMessages(introScenario, sessionId)])
-      }
     } catch (error: any) {
       console.error('Erro ao carregar histórico:', error)
+    }
+  }
+
+  const loadRollOrderInfo = async (sessionId: number) => {
+    try {
+      const response = await api.get(`/api/game/boards/${sessionId}/order`)
+      setRollOrderInfo(response.data)
+    } catch (error) {
+      console.error('Erro ao carregar ordem de rolagem:', error)
     }
   }
 
@@ -449,6 +461,12 @@ function GamePageContent() {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [interactions])
+
+  useEffect(() => {
+    if (session?.id) {
+      loadRollOrderInfo(session.id)
+    }
+  }, [session?.id])
 
   const normalizeText = (text: string) => {
     if (!text) return ''
@@ -997,7 +1015,20 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
     router.push('/login')
   }
 
+  const getRoomsBasePath = () => {
+    if (finalUser?.role === 'ADMIN' || pathname?.startsWith('/admin')) {
+      return '/admin/games'
+    }
+    if (finalUser?.role === 'FACILITATOR' || pathname?.startsWith('/facilitator')) {
+      return '/facilitator/games'
+    }
+    return '/player/games'
+  }
+
   const handleBackToRooms = async () => {
+    if (session?.status === 'active') {
+      await pauseSession()
+    }
     let gameId = session?.game_id || (urlGameId ? parseInt(urlGameId) : null)
 
     if (!gameId) {
@@ -1007,17 +1038,17 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
         if (games.length > 0) {
           gameId = games[0].id
         } else {
-          router.push('/player')
+          router.push(getRoomsBasePath().replace('/games', ''))
           return
         }
       } catch (error) {
         console.error('Erro ao buscar jogos:', error)
-        router.push('/player')
+        router.push(getRoomsBasePath().replace('/games', ''))
         return
       }
     }
 
-    router.push(`/player/games/${gameId}/rooms`)
+    router.push(`${getRoomsBasePath()}/${gameId}/rooms`)
   }
 
   if (!_hasHydrated || !authChecked) {
@@ -1100,7 +1131,7 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {finalUser?.role === 'PLAYER' && (
+            {finalUser?.role && (
               <button
                 onClick={handleBackToRooms}
                 className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors flex items-center gap-2"
@@ -1153,6 +1184,17 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
             </div>
           ) : (
             <div className="space-y-4 relative z-10">
+              {rollOrderInfo && rollOrderInfo.order.length > 1 && (
+                <div className="bg-white/90 rounded-lg px-4 py-3 border border-gray-200 shadow-sm">
+                  <p className="text-xs text-gray-500 mb-1">Ordem de rolagem</p>
+                  <p className="text-sm text-gray-800">
+                    {rollOrderInfo.order.map((item) => `${item.slot}. ${item.name}`).join(' • ')}
+                  </p>
+                  <p className="text-sm text-gray-700 mt-1">
+                    Jogador a rolar agora: {rollOrderInfo.current?.name}
+                  </p>
+                </div>
+              )}
               {interactions.map((interaction) => (
                 <div key={interaction.id} className="space-y-2">
                   {interaction.message_type === 'scene' ? (
@@ -1260,7 +1302,7 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
               />
               Incluir áudio na resposta
             </label>
-            {finalUser?.role === 'PLAYER' && (
+            {finalUser?.role && (
               <button
                 onClick={handleBackToRooms}
                 className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm flex items-center gap-2"

@@ -15,7 +15,7 @@ interface GameStats {
   active_llm: string | null
   sessions_count: number
   active_sessions_count: number
-  users_count: number
+  players_count: number
 }
 
 export default function DashboardPage() {
@@ -29,7 +29,7 @@ export default function DashboardPage() {
     active_llm: null,
     sessions_count: 0,
     active_sessions_count: 0,
-    users_count: 0,
+    players_count: 0,
   })
   const [loading, setLoading] = useState(true)
 
@@ -79,6 +79,7 @@ export default function DashboardPage() {
       const llms = llmsRes.data || []
       const sessions = sessionsRes.data || []
       const users = usersRes.data || []
+      const players = users.filter((u: any) => u.role === 'PLAYER')
 
       // Filtrar sessões do jogo selecionado
       const gameSessions = sessions.filter((s: any) => s.game_id === gameId)
@@ -94,7 +95,7 @@ export default function DashboardPage() {
         active_llm: activeLlm ? `${activeLlm.provider} - ${activeLlm.model_name}` : null,
         sessions_count: gameSessions.length,
         active_sessions_count: activeSessions.length,
-        users_count: users.length,
+        players_count: players.length,
       })
     } catch (error) {
       console.error('Erro ao carregar dados:', error)
@@ -156,8 +157,8 @@ export default function DashboardPage() {
       href: '/admin/sessions',
     },
     {
-      title: 'Usuários',
-      value: stats.users_count,
+      title: 'Jogadores',
+      value: stats.players_count,
       icon: Users,
       color: 'bg-indigo-500',
       href: '/admin/users',
@@ -282,7 +283,7 @@ export default function DashboardPage() {
             className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
           >
             <Users className="h-5 w-5 text-indigo-600 mr-3" />
-            <span className="text-sm font-medium text-gray-900">Gerenciar Usuários</span>
+            <span className="text-sm font-medium text-gray-900">Gerenciar Jogadores</span>
           </Link>
           <Link
             href="/admin"

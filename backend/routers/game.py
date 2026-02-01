@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import random
 import re
 import unicodedata
 from pathlib import Path
 from database import get_db
-from models import GameSession, SessionInteraction, User, GameRule, Scenario, LLMConfiguration, PlayerGameAccess, UserRole
+from models import GameSession, SessionInteraction, User, GameRule, Scenario, LLMConfiguration, PlayerGameAccess, UserRole, PlayerBoard, RoomMember
 from schemas import InteractionCreate, InteractionResponse, LLMConfigResponse
 from auth import get_current_active_user
 from services.llm_service import LLMService
@@ -42,13 +43,49 @@ async def get_available_scenarios(
     scenarios = query.order_by(Scenario.order).all()
     return scenarios
 
+@router.get("/boards/{session_id}/order")
+async def get_board_order(session_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
+    session = db.query(GameSession).filter(GameSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    if current_user.role.value != "ADMIN" and session.player_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    board = db.query(PlayerBoard).filter(PlayerBoard.session_id == session_id).first()
+    state = board.board_state if board else {}
+    order = state.get("order") if isinstance(state, dict) else None
+    turn_index = int(state.get("turn_index") or 0) if isinstance(state, dict) else 0
+
+    if not order:
+        order = []
+        if session.room_id:
+            members = db.query(RoomMember).filter(RoomMember.room_id == session.room_id).all()
+            member_users = db.query(User).filter(User.id.in_([m.user_id for m in members])).all()
+            user_map = {u.id: u.username for u in member_users}
+            for idx, member in enumerate(members):
+                order.append({"slot": idx + 1, "name": user_map.get(member.user_id, f"Jogador {idx + 1}")})
+        if not order:
+            order = [{"slot": 1, "name": "Jogador 1"}]
+        turn_index = 0
+
+    current = order[turn_index % len(order)]
+    next_player = order[(turn_index + 1) % len(order)] if len(order) > 1 else current
+    return {"order": order, "current": current, "next": next_player}
+
 @router.post("/interact", response_model=InteractionResponse)
 async def interact_with_game(interaction_data: InteractionCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     session = db.query(GameSession).filter(GameSession.id == interaction_data.session_id, GameSession.player_id == current_user.id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Sessão não encontrada")
     if session.status != "active":
-        raise HTTPException(status_code=400, detail="Sessão não está ativa")
+        if session.status == "paused":
+            session.status = "active"
+            session.last_activity = datetime.utcnow()
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        else:
+            raise HTTPException(status_code=400, detail="Sessão não está ativa")
     
     # Verificar se é a primeira interação
     existing_interactions = db.query(SessionInteraction).filter(SessionInteraction.session_id == session.id).count()
@@ -75,6 +112,10 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
 
     def _is_prompt_instruction(rule: GameRule) -> bool:
         return "prompt de instrucao" in _norm(rule.title)
+
+    def _is_rules_rule(rule: GameRule) -> bool:
+        title = _norm(rule.title)
+        return "regras" in title or "mecanicas" in title or rule.rule_type in ["rule", "mechanic"]
 
     number_words = {
         "um": 1, "uma": 1, "dois": 2, "duas": 2, "tres": 3, "três": 3,
@@ -240,6 +281,159 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
                 continue
             lines.append(line)
         return "\n".join(lines).strip()
+
+    def _extract_rules_section(content: str, section_number: int) -> str:
+        if not content:
+            return ""
+        pattern = rf"(?:se[cç][aã]o)\s*{section_number}\\b[:\\.\\-]*"
+        normalized = _norm(content)
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if not match:
+            return ""
+        start = match.start()
+        end_match = re.search(rf"(?:se[cç][aã]o)\s*{section_number + 1}\\b", normalized[start:])
+        end_index = start + end_match.start() if end_match else len(content)
+        return content[start:end_index].strip()
+
+    def _sanitize_rules_text(content: str) -> str:
+        if not content:
+            return ""
+        lines: List[str] = []
+        blocked_terms = [
+            "dado", "dados", "rolar", "rolagem", "anula", "anular", "substitui", "substituir",
+            "impede", "avanca", "avanç", "cena", "elemento", "sombra", "luz", "jogador", "ia",
+            "pode", "podem", "deve", "devem", "quando", "caso", "se ", "regras", "mecanica", "mecânica"
+        ]
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            normalized = _norm(stripped)
+            if normalized.startswith("seção") or normalized.startswith("secao"):
+                continue
+            if any(term in normalized for term in blocked_terms):
+                continue
+            if normalized[:1].isdigit():
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
+
+    def _get_rules_file_content() -> str:
+        for rule in game_rules:
+            if not _is_rules_rule(rule):
+                continue
+            file_content = (rule.content or {}).get("file_content")
+            if file_content:
+                return file_content
+        return ""
+
+    def _is_dice_roll_request(text: str) -> bool:
+        normalized = _norm(text)
+        return "rolar dados" in normalized or "rolar os dados" in normalized or "rolar dado" in normalized
+
+    def _get_or_create_board() -> PlayerBoard:
+        board = db.query(PlayerBoard).filter(
+            PlayerBoard.session_id == session.id,
+            PlayerBoard.player_id == current_user.id
+        ).first()
+        if board:
+            return board
+        board = PlayerBoard(session_id=session.id, player_id=current_user.id, board_state={})
+        db.add(board)
+        db.commit()
+        db.refresh(board)
+        return board
+
+    def _build_roll_order(profile_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        players = profile_data.get("players") or []
+        if players:
+            return [
+                {"slot": idx + 1, "name": player.get("name") or f"Jogador {idx + 1}"}
+                for idx, player in enumerate(players)
+            ]
+        count = profile_data.get("count") or 1
+        return [{"slot": idx + 1, "name": f"Jogador {idx + 1}"} for idx in range(count)]
+
+    def _apply_shadow_light_rules(slot_state: Dict[str, Any], element_key: str) -> Dict[str, Any]:
+        counts = slot_state.get("counts") or {}
+        effect: Dict[str, Any] = {}
+        if element_key == "sombra":
+            if int(counts.get("luz", 0)) > 0:
+                counts["luz"] = int(counts.get("luz", 0)) - 1
+                effect["shadow_canceled_light"] = True
+            else:
+                counts["sombra"] = int(counts.get("sombra", 0)) + 1
+                effect["shadow_added"] = True
+        elif element_key == "luz":
+            if int(counts.get("sombra", 0)) > 0:
+                counts["sombra"] = int(counts.get("sombra", 0)) - 1
+                effect["light_canceled_shadow"] = True
+            else:
+                counts["luz"] = int(counts.get("luz", 0)) + 1
+                effect["light_added"] = True
+        else:
+            counts[element_key] = int(counts.get(element_key, 0)) + 1
+            effect["element_added"] = element_key
+        slot_state["counts"] = counts
+        return effect
+
+    def _update_board_with_element(board: PlayerBoard, element_key: str, profile_data: Dict[str, Any]) -> Dict[str, Any]:
+        state = board.board_state or {}
+        order = state.get("order") or _build_roll_order(profile_data)
+        if not order:
+            order = [{"slot": 1, "name": "Jogador 1"}]
+        turn_index = int(state.get("turn_index") or 0)
+        current_turn = order[turn_index % len(order)]
+        slots = state.get("slots") or {}
+        slot_key = str(current_turn["slot"])
+        slot_state = slots.get(slot_key) or {}
+        effect = _apply_shadow_light_rules(slot_state, element_key)
+        history = slot_state.get("history") or []
+        history.append({"element": element_key, "effect": effect, "at": datetime.utcnow().isoformat()})
+        slot_state["history"] = history
+        slots[slot_key] = slot_state
+        state["slots"] = slots
+        state["order"] = order
+        state["turn_index"] = (turn_index + 1) % len(order)
+        board.board_state = state
+        db.add(board)
+        return {"order": order, "current": current_turn, "next": order[state["turn_index"]]}
+
+    def _format_board_status(session_id: int) -> str:
+        board = db.query(PlayerBoard).filter(PlayerBoard.session_id == session_id).first()
+        if not board or not isinstance(board.board_state, dict):
+            return "Tabuleiro pessoal: sem registros."
+        state = board.board_state or {}
+        order = state.get("order") or []
+        slots = state.get("slots") or {}
+        label_map = {
+            "agua": "Água",
+            "ar": "Ar",
+            "terra": "Terra",
+            "fogo": "Fogo",
+            "sombra": "Sombra",
+            "luz": "Luz",
+        }
+        lines = ["Tabuleiro pessoal (status atual):"]
+        if order:
+            for item in order:
+                slot_key = str(item.get("slot"))
+                slot_state = slots.get(slot_key) or {}
+                counts = slot_state.get("counts") or {}
+                if not counts:
+                    counts_text = "sem elementos registrados"
+                else:
+                    counts_text = ", ".join(
+                        f"{label_map.get(key, key)}: {counts[key]}" for key in counts
+                    )
+                lines.append(f"- {item.get('name', f'Jogador {slot_key}')}: {counts_text}")
+            return "\n".join(lines)
+        # fallback para caso não exista ordem
+        counts = state.get("counts") or {}
+        if not counts:
+            return "Tabuleiro pessoal: sem registros."
+        counts_text = ", ".join(f"{label_map.get(key, key)}: {counts[key]}" for key in counts)
+        return f"Tabuleiro pessoal (status atual): {counts_text}"
 
     def _split_scene_segments(content: str) -> List[str]:
         if not content:
@@ -439,7 +633,7 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
     history_interactions = _get_recent_interactions()
     simulated_state = _simulate_state(history_interactions, base_scene)
     previous_scene = simulated_state.get("scene") or base_scene
-    segment_index = simulated_state.get("index", 0)
+    segment_index = session.current_scene_index if session.current_scene_index is not None else simulated_state.get("index", 0)
 
     decision = _advance_state_for_input(previous_scene, segment_index, interaction_data.player_input or "")
     decided_scene = decision.get("scene") or previous_scene
@@ -448,10 +642,12 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
     element_selected = decision.get("element")
     segments = decision.get("segments") or _get_scene_segments(decided_scene)
     next_segment = decision.get("next_segment") or ""
+    next_index_for_storage = _consume_segment_index(decision.get("index", 0), segments)
 
     if decided_scene and decided_scene.id:
         session.current_scenario_id = decided_scene.id
         current_scenario = decided_scene
+    session.current_scene_index = next_index_for_storage
 
     llm_service = LLMService(db)
     context = llm_service.build_game_context(session.id, current_scenario, game_rules)
@@ -588,6 +784,69 @@ async def interact_with_game(interaction_data: InteractionCreate, db: Session = 
         system_prompt += f"\n\nTRECHO DA CENA ATUAL (APRESENTAR INTEGRALMENTE):\n{next_segment}"
     
     user_prompt = interaction_data.player_input
+
+    if _is_dice_roll_request(interaction_data.player_input or ""):
+        dice_elements = [
+            {"key": "agua", "name": "Água", "icon": "💧"},
+            {"key": "ar", "name": "Ar", "icon": "🌬️"},
+            {"key": "terra", "name": "Terra", "icon": "🌱"},
+            {"key": "fogo", "name": "Fogo", "icon": "🔥"},
+            {"key": "sombra", "name": "Sombra", "icon": "🌑"},
+            {"key": "luz", "name": "Luz", "icon": "✨"},
+        ]
+        selected = random.choice(dice_elements)
+        rules_content = _get_rules_file_content()
+        shadow_text = _sanitize_rules_text(_extract_rules_section(rules_content, 5))
+        light_text = _sanitize_rules_text(_extract_rules_section(rules_content, 6))
+        board = _get_or_create_board()
+        turn_info = _update_board_with_element(board, selected["key"], profile)
+        if selected["key"] == "sombra":
+            outcome = shadow_text or "Uma sombra se move e aguarda sua resposta."
+        elif selected["key"] == "luz":
+            outcome = light_text or "Uma luz clara se revela e guia sua próxima escolha."
+        else:
+            outcome = f"O elemento {selected['name']} foi adicionado ao seu tabuleiro pessoal."
+        response_text = (
+            f"Resultado da rolagem: {selected['icon']} {selected['name']}\n"
+            f"{outcome}"
+        )
+        if turn_info.get("order") and len(turn_info["order"]) > 1:
+            order_text = ", ".join([f"{item['slot']}. {item['name']}" for item in turn_info["order"]])
+            response_text = (
+                f"Ordem de rolagem: {order_text}\n"
+                f"Jogador a rolar agora: {turn_info['current']['name']}\n\n"
+                f"{response_text}\n"
+                f"Próximo jogador: {turn_info['next']['name']}"
+            )
+        response_text = f"{response_text}\n\n{_format_board_status(session.id)}"
+        if next_segment:
+            response_text = f"{response_text}\n\n{next_segment}"
+        audio_url = None
+        if interaction_data.include_audio_response:
+            audio_service = AudioService()
+            try:
+                audio_path = await audio_service.text_to_speech(response_text)
+                audio_url = f"/api/audio/{Path(audio_path).name}"
+            except Exception:
+                pass
+        interaction = SessionInteraction(
+            session_id=session.id,
+            player_input=interaction_data.player_input,
+            player_input_type=interaction_data.player_input_type,
+            ai_response=response_text,
+            ai_response_audio_url=audio_url,
+            llm_provider="dice",
+            llm_model="local",
+            tokens_used=0,
+            cost=0.0,
+            response_time=0.0,
+        )
+        session.last_activity = datetime.utcnow()
+        db.add(interaction)
+        db.add(session)
+        db.commit()
+        db.refresh(interaction)
+        return interaction
     
     try:
         llm_response = await llm_service.generate_response(

@@ -77,7 +77,7 @@ async def delete_user(
     # Importar modelos necessários
     from models import (
         GameSession, SessionInteraction, SessionScenario,
-        RoomMember, FacilitatorPlayer, PlayerGameAccess,
+        RoomMember, FacilitatorPlayer, PlayerGameAccess, FacilitatorGameAccess,
         Invitation, InvitationGame, Room, GameRule
     )
     
@@ -104,6 +104,11 @@ async def delete_user(
     # 4. Deletar PlayerGameAccess (tanto como jogador quanto como granted_by)
     db.query(PlayerGameAccess).filter(
         (PlayerGameAccess.player_id == user_id) | (PlayerGameAccess.granted_by == user_id)
+    ).delete(synchronize_session=False)
+
+    # 4b. Deletar FacilitatorGameAccess (tanto como facilitador quanto como granted_by)
+    db.query(FacilitatorGameAccess).filter(
+        (FacilitatorGameAccess.facilitator_id == user_id) | (FacilitatorGameAccess.granted_by == user_id)
     ).delete(synchronize_session=False)
     
     # 5. Deletar InvitationGame relacionados a convites do usuário

@@ -3,15 +3,22 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
+from pydantic import BaseModel
 from database import get_db
-from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember, SessionScenario
-from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse
+from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember, SessionScenario, PlayerGameAccess, FacilitatorGameAccess, InvitationGame
+from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse, PlayerGameAccessResponse, FacilitatorGameAccessResponse
 from services.email_service import EmailService
 from auth import get_current_admin_user
 from services.llm_service import LLMService
 from services.file_service import FileService
 
 router = APIRouter()
+
+class GrantGameAccessRequest(BaseModel):
+    user_id: int
+
+class UpdateGameAccessRequest(BaseModel):
+    game_ids: List[int]
 
 # ========== GAMES ==========
 @router.post("/games", response_model=GameResponse, status_code=201)
@@ -66,6 +73,98 @@ async def get_game(
     if not game:
         raise HTTPException(status_code=404, detail="Jogo não encontrado")
     return game
+
+@router.post("/games/{game_id}/grant/player", response_model=PlayerGameAccessResponse, status_code=201)
+async def grant_player_game_access(
+    game_id: int,
+    request: GrantGameAccessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado")
+
+    player = db.query(User).filter(User.id == request.user_id).first()
+    if not player or player.role != UserRole.PLAYER:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+
+    existing = db.query(PlayerGameAccess).filter(
+        PlayerGameAccess.player_id == player.id,
+        PlayerGameAccess.game_id == game_id
+    ).first()
+    if existing:
+        return {
+            "id": existing.id,
+            "player_id": existing.player_id,
+            "game_id": existing.game_id,
+            "game_title": game.title,
+            "granted_by": existing.granted_by,
+            "created_at": existing.created_at,
+        }
+
+    access = PlayerGameAccess(
+        player_id=player.id,
+        game_id=game_id,
+        granted_by=current_user.id
+    )
+    db.add(access)
+    db.commit()
+    db.refresh(access)
+    return {
+        "id": access.id,
+        "player_id": access.player_id,
+        "game_id": access.game_id,
+        "game_title": game.title,
+        "granted_by": access.granted_by,
+        "created_at": access.created_at,
+    }
+
+@router.post("/games/{game_id}/grant/facilitator", response_model=FacilitatorGameAccessResponse, status_code=201)
+async def grant_facilitator_game_access(
+    game_id: int,
+    request: GrantGameAccessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    game = db.query(Game).filter(Game.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Jogo não encontrado")
+
+    facilitator = db.query(User).filter(User.id == request.user_id).first()
+    if not facilitator or facilitator.role != UserRole.FACILITATOR:
+        raise HTTPException(status_code=404, detail="Facilitador não encontrado")
+
+    existing = db.query(FacilitatorGameAccess).filter(
+        FacilitatorGameAccess.facilitator_id == facilitator.id,
+        FacilitatorGameAccess.game_id == game_id
+    ).first()
+    if existing:
+        return {
+            "id": existing.id,
+            "facilitator_id": existing.facilitator_id,
+            "game_id": existing.game_id,
+            "game_title": game.title,
+            "granted_by": existing.granted_by,
+            "created_at": existing.created_at,
+        }
+
+    access = FacilitatorGameAccess(
+        facilitator_id=facilitator.id,
+        game_id=game_id,
+        granted_by=current_user.id
+    )
+    db.add(access)
+    db.commit()
+    db.refresh(access)
+    return {
+        "id": access.id,
+        "facilitator_id": access.facilitator_id,
+        "game_id": access.game_id,
+        "game_title": game.title,
+        "granted_by": access.granted_by,
+        "created_at": access.created_at,
+    }
 
 @router.put("/games/{game_id}", response_model=GameResponse)
 async def update_game(
@@ -890,6 +989,12 @@ async def invite_facilitator(
     if existing_invitation:
         raise HTTPException(status_code=400, detail="Já existe um convite pendente para este e-mail")
     
+    game_ids = invitation_data.game_ids or []
+    if game_ids:
+        games = db.query(Game).filter(Game.id.in_(game_ids)).all()
+        if len(games) != len(game_ids):
+            raise HTTPException(status_code=400, detail="Um ou mais jogos não foram encontrados")
+
     # Gerar token e criar convite
     email_service = EmailService()
     token = email_service.generate_invitation_token()
@@ -904,6 +1009,15 @@ async def invite_facilitator(
         expires_at=expires_at
     )
     db.add(invitation)
+    db.flush()
+
+    for game_id in game_ids:
+        invitation_game = InvitationGame(
+            invitation_id=invitation.id,
+            game_id=game_id
+        )
+        db.add(invitation_game)
+
     db.commit()
     db.refresh(invitation)
     
@@ -916,6 +1030,203 @@ async def invite_facilitator(
     )
     
     return invitation
+
+@router.post("/players/invite", response_model=InvitationResponse, status_code=201)
+async def invite_player(
+    invitation_data: InvitationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Cria convite para jogador"""
+    if invitation_data.role != UserRole.PLAYER:
+        raise HTTPException(status_code=400, detail="Este endpoint é apenas para convites de jogadores")
+
+    if not invitation_data.game_ids:
+        raise HTTPException(status_code=400, detail="Selecione pelo menos um jogo")
+
+    # Verificar se já existe usuário com este e-mail
+    existing_user = db.query(User).filter(User.email == invitation_data.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Já existe um usuário com este e-mail")
+
+    # Verificar se já existe convite pendente
+    existing_invitation = db.query(Invitation).filter(
+        Invitation.email == invitation_data.email,
+        Invitation.status == InvitationStatus.PENDING
+    ).first()
+    if existing_invitation:
+        raise HTTPException(status_code=400, detail="Já existe um convite pendente para este e-mail")
+
+    game_ids = invitation_data.game_ids or []
+    games = db.query(Game).filter(Game.id.in_(game_ids)).all()
+    if len(games) != len(game_ids):
+        raise HTTPException(status_code=400, detail="Um ou mais jogos não foram encontrados")
+
+    # Gerar token e criar convite
+    email_service = EmailService()
+    token = email_service.generate_invitation_token()
+    expires_at = email_service.get_invitation_expiry()
+
+    invitation = Invitation(
+        email=invitation_data.email,
+        role=UserRole.PLAYER,
+        inviter_id=current_user.id,
+        token=token,
+        status=InvitationStatus.PENDING,
+        expires_at=expires_at
+    )
+    db.add(invitation)
+    db.flush()
+
+    for game_id in game_ids:
+        invitation_game = InvitationGame(
+            invitation_id=invitation.id,
+            game_id=game_id
+        )
+        db.add(invitation_game)
+
+    db.commit()
+    db.refresh(invitation)
+
+    await email_service.send_invitation_email(
+        email=invitation_data.email,
+        role="player",
+        invitation_token=token,
+        inviter_name=current_user.username
+    )
+
+    return invitation
+
+@router.get("/players/invitations", response_model=List[InvitationResponse])
+async def list_player_invitations(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Lista todos os convites de jogadores"""
+    invitations = db.query(Invitation).filter(
+        Invitation.role == UserRole.PLAYER
+    ).order_by(Invitation.created_at.desc()).offset(skip).limit(limit).all()
+    return invitations
+
+@router.get("/players/{player_id}/games", response_model=List[PlayerGameAccessResponse])
+async def get_player_game_accesses(
+    player_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    player = db.query(User).filter(User.id == player_id, User.role == UserRole.PLAYER).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+
+    accesses = db.query(PlayerGameAccess).filter(
+        PlayerGameAccess.player_id == player_id
+    ).all()
+
+    result = []
+    for access in accesses:
+        game = db.query(Game).filter(Game.id == access.game_id).first()
+        if game:
+            result.append({
+                "id": access.id,
+                "player_id": access.player_id,
+                "game_id": access.game_id,
+                "game_title": game.title,
+                "granted_by": access.granted_by,
+                "created_at": access.created_at
+            })
+    return result
+
+@router.put("/players/{player_id}/games")
+async def update_player_game_accesses(
+    player_id: int,
+    request: UpdateGameAccessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    player = db.query(User).filter(User.id == player_id, User.role == UserRole.PLAYER).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+
+    game_ids = request.game_ids or []
+    games = db.query(Game).filter(Game.id.in_(game_ids)).all()
+    if len(games) != len(game_ids):
+        raise HTTPException(status_code=400, detail="Um ou mais jogos não foram encontrados")
+
+    db.query(PlayerGameAccess).filter(
+        PlayerGameAccess.player_id == player_id
+    ).delete()
+
+    for game_id in game_ids:
+        access = PlayerGameAccess(
+            player_id=player_id,
+            game_id=game_id,
+            granted_by=current_user.id
+        )
+        db.add(access)
+
+    db.commit()
+    return {"message": "Acessos aos jogos atualizados com sucesso"}
+
+@router.get("/facilitators/{facilitator_id}/games", response_model=List[FacilitatorGameAccessResponse])
+async def get_facilitator_game_accesses(
+    facilitator_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    facilitator = db.query(User).filter(User.id == facilitator_id, User.role == UserRole.FACILITATOR).first()
+    if not facilitator:
+        raise HTTPException(status_code=404, detail="Facilitador não encontrado")
+
+    accesses = db.query(FacilitatorGameAccess).filter(
+        FacilitatorGameAccess.facilitator_id == facilitator_id
+    ).all()
+
+    result = []
+    for access in accesses:
+        game = db.query(Game).filter(Game.id == access.game_id).first()
+        if game:
+            result.append({
+                "id": access.id,
+                "facilitator_id": access.facilitator_id,
+                "game_id": access.game_id,
+                "game_title": game.title,
+                "granted_by": access.granted_by,
+                "created_at": access.created_at
+            })
+    return result
+
+@router.put("/facilitators/{facilitator_id}/games")
+async def update_facilitator_game_accesses(
+    facilitator_id: int,
+    request: UpdateGameAccessRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    facilitator = db.query(User).filter(User.id == facilitator_id, User.role == UserRole.FACILITATOR).first()
+    if not facilitator:
+        raise HTTPException(status_code=404, detail="Facilitador não encontrado")
+
+    game_ids = request.game_ids or []
+    games = db.query(Game).filter(Game.id.in_(game_ids)).all()
+    if len(games) != len(game_ids):
+        raise HTTPException(status_code=400, detail="Um ou mais jogos não foram encontrados")
+
+    db.query(FacilitatorGameAccess).filter(
+        FacilitatorGameAccess.facilitator_id == facilitator_id
+    ).delete()
+
+    for game_id in game_ids:
+        access = FacilitatorGameAccess(
+            facilitator_id=facilitator_id,
+            game_id=game_id,
+            granted_by=current_user.id
+        )
+        db.add(access)
+
+    db.commit()
+    return {"message": "Acessos aos jogos atualizados com sucesso"}
 
 @router.get("/facilitators/invitations", response_model=List[InvitationResponse])
 async def list_facilitator_invitations(

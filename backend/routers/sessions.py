@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 from database import get_db
-from models import GameSession, User, PlayerGameAccess, UserRole
+from models import GameSession, User, PlayerGameAccess, UserRole, Room, FacilitatorGameAccess
 from schemas import GameSessionCreate, GameSessionResponse
 from auth import get_current_active_user
 
@@ -30,9 +30,19 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
     
     from models import Game
     
+    # Validar jogo da sala, se houver room_id
+    room_game_id = None
+    if session_data.room_id is not None:
+        room = db.query(Room).filter(Room.id == session_data.room_id).first()
+        if not room:
+            raise HTTPException(status_code=404, detail="Sala não encontrada")
+        room_game_id = room.game_id
+
     # Se não houver game_id, buscar o primeiro jogo disponível para o usuário
-    game_id = session_data.game_id
+    game_id = session_data.game_id or room_game_id
     if not game_id:
+        if session_data.room_id is None:
+            raise HTTPException(status_code=400, detail="game_id é obrigatório quando não há sala")
         # Para jogadores, buscar primeiro jogo ao qual têm acesso
         if current_user.role == UserRole.PLAYER:
             access = db.query(PlayerGameAccess).filter(
@@ -50,11 +60,20 @@ async def create_session(session_data: GameSessionCreate, db: Session = Depends(
             else:
                 raise HTTPException(status_code=400, detail="Nenhum jogo disponível. Crie um jogo primeiro.")
     else:
+        if room_game_id is not None and game_id != room_game_id:
+            raise HTTPException(status_code=400, detail="Sala pertence a outro jogo")
         # Verificar se o jogador tem acesso ao jogo solicitado
         if current_user.role == UserRole.PLAYER:
             access = db.query(PlayerGameAccess).filter(
                 PlayerGameAccess.player_id == current_user.id,
                 PlayerGameAccess.game_id == game_id
+            ).first()
+            if not access:
+                raise HTTPException(status_code=403, detail="Você não tem acesso a este jogo.")
+        elif current_user.role == UserRole.FACILITATOR:
+            access = db.query(FacilitatorGameAccess).filter(
+                FacilitatorGameAccess.facilitator_id == current_user.id,
+                FacilitatorGameAccess.game_id == game_id
             ).first()
             if not access:
                 raise HTTPException(status_code=403, detail="Você não tem acesso a este jogo.")

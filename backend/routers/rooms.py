@@ -10,13 +10,27 @@ router = APIRouter()
 
 @router.post("/", response_model=RoomResponse, status_code=201)
 async def create_room(room_data: RoomCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
-    db_room = Room(name=room_data.name, description=room_data.description, max_players=room_data.max_players, created_by=current_user.id)
+    if not room_data.game_id:
+        raise HTTPException(status_code=400, detail="game_id é obrigatório para criar sala")
+    existing = db.query(Room).filter(
+        Room.game_id == room_data.game_id,
+        Room.name == room_data.name
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Já existe uma sala com esse nome neste jogo")
+    db_room = Room(
+        name=room_data.name,
+        description=room_data.description,
+        max_players=room_data.max_players,
+        created_by=current_user.id,
+        game_id=room_data.game_id
+    )
     db.add(db_room)
-    db.commit()
-    db.refresh(db_room)
+    db.flush()
     member = RoomMember(room_id=db_room.id, user_id=current_user.id)
     db.add(member)
     db.commit()
+    db.refresh(db_room)
     return db_room
 
 @router.get("/", response_model=List[RoomResponse])

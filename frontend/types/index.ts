@@ -5,6 +5,7 @@ export interface User {
   role: 'ADMIN' | 'FACILITATOR' | 'PLAYER'
   is_active: boolean
   created_at: string
+  game_id?: number
 }
 
 export interface Invitation {
@@ -17,6 +18,7 @@ export interface Invitation {
   expires_at?: string
   accepted_at?: string
   created_at: string
+  game_ids?: number[]
 }
 
 export interface FacilitatorPlayer {
@@ -25,11 +27,22 @@ export interface FacilitatorPlayer {
   player_username: string
   player_email: string
   created_at: string
+  game_id?: number
 }
 
 export interface PlayerGameAccess {
   id: number
   player_id: number
+  game_id: number
+  game_title: string
+  granted_by: number
+  created_at: string
+  game_id?: number
+}
+
+export interface FacilitatorGameAccess {
+  id: number
+  facilitator_id: number
   game_id: number
   game_title: string
   granted_by: number
@@ -45,6 +58,7 @@ export interface GameRule {
   content: Record<string, any>
   is_active: boolean
   created_at: string
+  game_id?: number
 }
 
 export interface Game {
@@ -70,6 +84,7 @@ export interface Scenario {
   order: number
   is_active: boolean
   created_at: string
+  game_id?: number
 }
 
 export interface LLMConfiguration {
@@ -86,6 +101,7 @@ export interface LLMConfiguration {
   total_cost: number
   avg_response_time: number
   created_at: string
+  game_id?: number
 }
 
 export interface GameSession {
@@ -115,6 +131,7 @@ export interface SessionInteraction {
   cost?: number
   response_time?: number
   created_at: string
+  game_id?: number
 }
 
 export interface Room {
@@ -124,6 +141,7 @@ export interface Room {
   max_players: number
   is_active: boolean
   created_at: string
+  game_id?: number
 }
 
 export interface PlayerRoom {
@@ -133,6 +151,7 @@ export interface PlayerRoom {
   max_players: number
   is_active: boolean
   created_at: string
+  game_id?: number
   member_count: number
   sessions: Array<{
     id: number

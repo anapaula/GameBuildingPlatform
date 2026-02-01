@@ -172,6 +172,11 @@ export default function AdminLayout({
     )
   }
 
+  const isPlayFlow = pathname?.startsWith('/admin/games') || pathname?.startsWith('/admin/game')
+  if (isPlayFlow) {
+    return <>{children}</>
+  }
+
   // Se estiver na página de seleção de jogos, mostrar apenas header simples
   const isGamesPage = pathname === '/admin'
   
@@ -280,6 +285,15 @@ export default function AdminLayout({
                         Sessões
                       </Link>
                       <Link
+                        href="/admin/games"
+                        className={`inline-flex items-center px-2 py-1 text-xs xl:text-sm font-medium whitespace-nowrap ${
+                          pathname?.startsWith('/admin/games') ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                        }`}
+                      >
+                        <Gamepad2 className="h-3 w-3 xl:h-4 xl:w-4 mr-1" />
+                        Jogar
+                      </Link>
+                      <Link
                         href="/admin/facilitators"
                         className={`inline-flex items-center px-2 py-1 text-xs xl:text-sm font-medium whitespace-nowrap ${
                           pathname === '/admin/facilitators' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
@@ -295,7 +309,7 @@ export default function AdminLayout({
                         }`}
                       >
                         <Users className="h-3 w-3 xl:h-4 xl:w-4 mr-1" />
-                        Usuários
+                        Jogadores
                       </Link>
                     </>
                   )}

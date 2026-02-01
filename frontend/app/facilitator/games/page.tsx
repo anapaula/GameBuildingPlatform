@@ -6,9 +6,9 @@ import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { Game } from '@/types'
-import { Gamepad2, LogOut } from 'lucide-react'
+import { ArrowLeft, Gamepad2, LogOut } from 'lucide-react'
 
-export default function PlayerPage() {
+export default function FacilitatorGamesPage() {
   const router = useRouter()
   const { user, isAuthenticated, _hasHydrated, logout } = useAuthStore()
   const [games, setGames] = useState<Game[]>([])
@@ -22,8 +22,8 @@ export default function PlayerPage() {
   useEffect(() => {
     if (!mounted || !_hasHydrated) return
 
-    if (!isAuthenticated || !user || user.role !== 'PLAYER') {
-      router.push('/login')
+    if (!isAuthenticated || !user || user.role !== 'FACILITATOR') {
+      router.push('/facilitator')
       return
     }
 
@@ -36,7 +36,7 @@ export default function PlayerPage() {
       setGames(res.data || [])
     } catch (error: any) {
       console.error('Erro ao carregar jogos:', error)
-      toast.error(error.response?.data?.detail || 'Erro ao carregar jogos disponíveis')
+      toast.error(error.response?.data?.detail || 'Erro ao carregar jogos')
     } finally {
       setLoading(false)
     }
@@ -53,7 +53,7 @@ export default function PlayerPage() {
   }
 
   const handleGameClick = (gameId: number) => {
-    router.push(`/player/games/${gameId}/rooms`)
+    router.push(`/facilitator/games/${gameId}/rooms`)
   }
 
   const resolveCoverUrl = (url?: string) => {
@@ -76,6 +76,13 @@ export default function PlayerPage() {
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex flex-wrap justify-between items-center gap-3">
           <div>
+            <button
+              onClick={() => router.push('/facilitator')}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-2"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Voltar para Meus Jogadores
+            </button>
             <h1 className="text-3xl font-bold text-gray-900">Jogos</h1>
             <p className="mt-2 text-sm text-gray-600">
               Selecione um jogo para criar salas e jogar.

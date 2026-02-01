@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Float, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey, JSON, Float, Enum as SQLEnum, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -32,9 +32,15 @@ class User(Base):
     # Relacionamentos para jogadores
     facilitator_relation = relationship("FacilitatorPlayer", foreign_keys="[FacilitatorPlayer.player_id]", back_populates="player")
     game_accesses = relationship("PlayerGameAccess", foreign_keys="[PlayerGameAccess.player_id]", back_populates="player")
+    facilitator_game_accesses = relationship("FacilitatorGameAccess", foreign_keys="[FacilitatorGameAccess.facilitator_id]", back_populates="facilitator")
 
 class Room(Base):
     __tablename__ = "rooms"
+
+    __table_args__ = (
+        UniqueConstraint("game_id", "name", name="uq_rooms_game_id_name"),
+        Index("ix_rooms_game_id", "game_id"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
@@ -42,6 +48,7 @@ class Room(Base):
     max_players = Column(Integer, default=4)
     is_active = Column(Boolean, default=True)
     created_by = Column(Integer, ForeignKey("users.id"))
+    game_id = Column(Integer, ForeignKey("games.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     members = relationship("RoomMember", back_populates="room")
@@ -49,6 +56,12 @@ class Room(Base):
 
 class RoomMember(Base):
     __tablename__ = "room_members"
+
+    __table_args__ = (
+        UniqueConstraint("room_id", "user_id", name="uq_room_members_room_user"),
+        Index("ix_room_members_room_id", "room_id"),
+        Index("ix_room_members_user_id", "user_id"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(Integer, ForeignKey("rooms.id"), nullable=False)
@@ -96,6 +109,11 @@ class Scenario(Base):
 
 class GameSession(Base):
     __tablename__ = "game_sessions"
+
+    __table_args__ = (
+        Index("ix_game_sessions_player_room_game_status", "player_id", "room_id", "game_id", "status"),
+        Index("ix_game_sessions_room_id", "room_id"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
@@ -103,6 +121,7 @@ class GameSession(Base):
     room_id = Column(Integer, ForeignKey("rooms.id"))
     current_scenario_id = Column(Integer, ForeignKey("scenarios.id"))
     current_phase = Column(Integer, default=1)
+    current_scene_index = Column(Integer, default=0)
     status = Column(String, default="active")
     llm_provider = Column(String)
     llm_model = Column(String)
@@ -147,6 +166,24 @@ class SessionScenario(Base):
     
     session = relationship("GameSession", back_populates="scenarios")
     scenario = relationship("Scenario", back_populates="session_scenarios")
+
+class PlayerBoard(Base):
+    __tablename__ = "player_boards"
+
+    __table_args__ = (
+        UniqueConstraint("session_id", "player_id", name="uq_player_boards_session_player"),
+        Index("ix_player_boards_session_id", "session_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("game_sessions.id"), nullable=False)
+    player_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    board_state = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    session = relationship("GameSession")
+    player = relationship("User")
 
 class GameRule(Base):
     __tablename__ = "game_rules"
@@ -242,6 +279,11 @@ class FacilitatorPlayer(Base):
 
 class PlayerGameAccess(Base):
     __tablename__ = "player_game_access"
+
+    __table_args__ = (
+        UniqueConstraint("player_id", "game_id", name="uq_player_game_access_player_game"),
+        Index("ix_player_game_access_player_id", "player_id"),
+    )
     
     id = Column(Integer, primary_key=True, index=True)
     player_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -250,4 +292,21 @@ class PlayerGameAccess(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     player = relationship("User", foreign_keys=[player_id], back_populates="game_accesses")
+    game = relationship("Game")
+
+class FacilitatorGameAccess(Base):
+    __tablename__ = "facilitator_game_access"
+
+    __table_args__ = (
+        UniqueConstraint("facilitator_id", "game_id", name="uq_facilitator_game_access_facilitator_game"),
+        Index("ix_facilitator_game_access_facilitator_id", "facilitator_id"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    facilitator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
+    granted_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    facilitator = relationship("User", foreign_keys=[facilitator_id], back_populates="facilitator_game_accesses")
     game = relationship("Game")

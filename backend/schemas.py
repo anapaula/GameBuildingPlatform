@@ -59,6 +59,7 @@ class RoomCreate(BaseModel):
     name: str
     description: Optional[str] = None
     max_players: int = 4
+    game_id: Optional[int] = None
 
 class RoomResponse(BaseModel):
     id: int
@@ -67,6 +68,7 @@ class RoomResponse(BaseModel):
     max_players: int
     is_active: bool
     created_at: datetime
+    game_id: Optional[int]
     
     class Config:
         from_attributes = True
@@ -84,6 +86,7 @@ class GameSessionResponse(BaseModel):
     player_id: int
     room_id: Optional[int]
     current_scenario_id: Optional[int]
+    current_scene_index: int
     current_phase: int
     status: str
     llm_provider: Optional[str]
@@ -293,5 +296,16 @@ class PlayerGameAccessResponse(BaseModel):
     granted_by: int
     created_at: datetime
     
+    class Config:
+        from_attributes = True
+
+class FacilitatorGameAccessResponse(BaseModel):
+    id: int
+    facilitator_id: int
+    game_id: int
+    game_title: str
+    granted_by: int
+    created_at: datetime
+
     class Config:
         from_attributes = True
