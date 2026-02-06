@@ -37,7 +37,6 @@ export interface PlayerGameAccess {
   game_title: string
   granted_by: number
   created_at: string
-  game_id?: number
 }
 
 export interface FacilitatorGameAccess {
@@ -58,7 +57,6 @@ export interface GameRule {
   content: Record<string, any>
   is_active: boolean
   created_at: string
-  game_id?: number
 }
 
 export interface Game {
@@ -84,7 +82,6 @@ export interface Scenario {
   order: number
   is_active: boolean
   created_at: string
-  game_id?: number
 }
 
 export interface LLMConfiguration {
@@ -101,7 +98,6 @@ export interface LLMConfiguration {
   total_cost: number
   avg_response_time: number
   created_at: string
-  game_id?: number
 }
 
 export interface GameSession {
