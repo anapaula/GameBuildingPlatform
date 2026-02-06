@@ -36,7 +36,9 @@ api.interceptors.request.use((config) => {
       delete config.headers['Content-Type']
     }
     // Log para debug (remover em produção)
-    console.log('API Request:', config.method?.toUpperCase(), config.baseURL + config.url)
+    const baseURL = config.baseURL ?? ''
+    const url = config.url ?? ''
+    console.log('API Request:', config.method?.toUpperCase(), `${baseURL}${url}`)
   }
   return config
 })
