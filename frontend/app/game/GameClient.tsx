@@ -229,7 +229,7 @@ function GameClient() {
         const scenario = scenarios.find((s: Scenario) => s.id === selectedScenario)
         if (scenario && scenario.description) {
           setTimeout(() => {
-            toast.info(`Cenário: ${scenario.name}`)
+            toast(`Cenário: ${scenario.name}`)
           }, 500)
         }
       }
