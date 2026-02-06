@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
+const createNoopStorage = () => ({
+  getItem: (_key: string) => null,
+  setItem: (_key: string, _value: string) => {},
+  removeItem: (_key: string) => {},
+})
+
 interface User {
   id: number
   username: string
@@ -38,7 +44,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() =>
+        typeof window !== 'undefined' ? localStorage : createNoopStorage()
+      ),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true)
       },
