@@ -244,11 +244,11 @@ function GameClient() {
   const continueSession = async (sessionId: number) => {
     setLoading(true)
     try {
-      const sessionResponse = await api.get(\/api/sessions/\\)
+      const sessionResponse = await api.get(`/api/sessions/${sessionId}`)
       const targetSession = sessionResponse.data
 
       if (targetSession.status === 'paused') {
-        await api.patch(\/api/sessions/\/resume\)
+        await api.patch(`/api/sessions/${sessionId}/resume`)
         targetSession.status = 'active'
       }
 
@@ -266,7 +266,7 @@ function GameClient() {
 
   const loadHistory = async (sessionId: number) => {
     try {
-      const response = await api.get(\/api/game/\/history\)
+      const response = await api.get(`/api/game/${sessionId}/history`)
       const history = response.data || []
       setInteractions(history)
     } catch (error: any) {
@@ -307,7 +307,7 @@ function GameClient() {
       const newInteraction = response.data
       setInteractions(prev => [...prev, newInteraction])
       
-      const sessionResponse = await api.get(\/api/sessions/\\)
+      const sessionResponse = await api.get(`/api/sessions/${session.id}`)
       setSession(sessionResponse.data)
 
       toast.success('Resposta recebida!')
@@ -390,7 +390,7 @@ function GameClient() {
     }
 
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    const audio = new Audio(\\\\)
+    const audio = new Audio(`${API_URL}${audioUrl}`)
     audio.play()
     setActiveAudio(audio)
 
@@ -403,7 +403,7 @@ function GameClient() {
     if (!session) return
 
     try {
-      await api.patch(\/api/sessions/\/pause\)
+      await api.patch(`/api/sessions/${session.id}/pause`)
       toast.success('Progresso salvo!')
       setSession({ ...session, status: 'paused' })
       setViewMode('select')
