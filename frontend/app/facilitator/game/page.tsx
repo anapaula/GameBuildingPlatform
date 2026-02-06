@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense } from 'react'
-import { GamePageContent } from '@/app/game/page'
+import GamePageContent from '@/app/game/page'
 
 export default function FacilitatorGamePage() {
   return (
