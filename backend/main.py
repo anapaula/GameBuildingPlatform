@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import uvicorn
+import os
 
 from database import SessionLocal, engine, Base
 from routers import auth, users, rooms, sessions, admin, game, llm_config, audio, games, facilitator, player
@@ -18,9 +19,18 @@ app = FastAPI(
 )
 
 # CORS
+origins_env = os.getenv("CORS_ORIGINS")
+allow_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+]
+if origins_env:
+    allow_origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

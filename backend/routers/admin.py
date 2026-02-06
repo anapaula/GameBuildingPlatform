@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from database import get_db
 from models import User, Game, GameRule, Scenario, LLMConfiguration, GameSession, SessionInteraction, LLMTestResult, Invitation, InvitationStatus, UserRole, FacilitatorPlayer, Room, RoomMember, SessionScenario, PlayerGameAccess, FacilitatorGameAccess, InvitationGame
 from schemas import GameCreate, GameResponse, GameRuleCreate, GameRuleResponse, ScenarioCreate, ScenarioResponse, LLMConfigCreate, LLMConfigUpdate, LLMConfigResponse, LLMTestRequest, LLMTestResponse, SessionStats, LLMStats, InvitationCreate, InvitationResponse, UserResponse, PlayerGameAccessResponse, FacilitatorGameAccessResponse
 from services.email_service import EmailService
-from auth import get_current_admin_user
+from auth import get_current_admin_user, get_password_hash
 from services.llm_service import LLMService
 from services.file_service import FileService
 
@@ -19,6 +19,36 @@ class GrantGameAccessRequest(BaseModel):
 
 class UpdateGameAccessRequest(BaseModel):
     game_ids: List[int]
+
+class AdminCreateRequest(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
+    is_active: bool = True
+
+@router.post("/admins", response_model=UserResponse, status_code=201)
+async def create_admin_user(
+    request: AdminCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    existing_user = db.query(User).filter(
+        (User.username == request.username) | (User.email == request.email)
+    ).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username ou email já está em uso")
+
+    admin_user = User(
+        username=request.username,
+        email=request.email,
+        hashed_password=get_password_hash(request.password),
+        role=UserRole.ADMIN,
+        is_active=request.is_active
+    )
+    db.add(admin_user)
+    db.commit()
+    db.refresh(admin_user)
+    return admin_user
 
 # ========== GAMES ==========
 @router.post("/games", response_model=GameResponse, status_code=201)

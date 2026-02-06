@@ -313,6 +313,15 @@ export default function AdminLayout({
                       </Link>
                     </>
                   )}
+                  <Link
+                    href="/admin/admins"
+                    className={`inline-flex items-center px-2 py-1 text-xs xl:text-sm font-medium whitespace-nowrap ${
+                      pathname === '/admin/admins' ? 'text-gray-900 border-b-2 border-blue-600' : 'text-gray-500 hover:text-blue-600'
+                    }`}
+                  >
+                    <Users className="h-3 w-3 xl:h-4 xl:w-4 mr-1" />
+                    Admins
+                  </Link>
                 </div>
               )}
             </div>
