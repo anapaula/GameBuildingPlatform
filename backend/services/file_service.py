@@ -1,10 +1,13 @@
 import os
-import aiofiles
+import io
+import mimetypes
 from pathlib import Path
 from typing import Optional
+
+import aiofiles
 import PyPDF2
 from docx import Document
-import io
+from supabase import create_client
 
 class FileService:
     def __init__(self):
@@ -22,6 +25,13 @@ class FileService:
         # Diretório para arquivos de elementos do jogo (regras/mecânicas/etc.)
         self.rule_files_dir = Path(os.getenv("RULE_FILES_DIR", "./rule_files"))
         self.rule_files_dir.mkdir(parents=True, exist_ok=True)
+
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        self.supabase_bucket = os.getenv("SUPABASE_STORAGE_BUCKET")
+        self.supabase_client = None
+        if self.supabase_url and self.supabase_key and self.supabase_bucket:
+            self.supabase_client = create_client(self.supabase_url, self.supabase_key)
     
     async def save_uploaded_file(self, file_data: bytes, filename: str, file_type: str = "scenario") -> str:
         """Salva arquivo enviado e retorna o caminho
@@ -40,6 +50,37 @@ class FileService:
         async with aiofiles.open(file_path, 'wb') as f:
             await f.write(file_data)
         return str(file_path)
+
+    def _get_storage_path(self, file_type: str, filename: str) -> str:
+        folder_map = {
+            "game_cover": "game_covers",
+            "scenario_image": "scenario_images",
+            "scenario_video": "scenario_videos",
+            "rule_file": "rule_files",
+            "scenario": "scenario_files",
+        }
+        folder = folder_map.get(file_type, "scenario_files")
+        return f"{folder}/{filename}"
+
+    def _upload_to_supabase(self, file_path: str, file_type: str) -> Optional[str]:
+        if not self.supabase_client or not self.supabase_bucket:
+            return None
+        if not file_path or not Path(file_path).exists():
+            return None
+
+        filename = Path(file_path).name
+        storage_path = self._get_storage_path(file_type, filename)
+        content_type, _ = mimetypes.guess_type(filename)
+        with open(file_path, "rb") as f:
+            self.supabase_client.storage.from_(self.supabase_bucket).upload(
+                storage_path,
+                f,
+                file_options={
+                    "content-type": content_type or "application/octet-stream",
+                    "upsert": True,
+                },
+            )
+        return self.supabase_client.storage.from_(self.supabase_bucket).get_public_url(storage_path)
     
     async def extract_text_from_file(self, file_path: str, file_extension: str) -> str:
         """Extrai texto de arquivos PDF, DOCX ou TXT"""
@@ -82,6 +123,13 @@ class FileService:
         """Retorna URL relativa para acessar o arquivo
         file_type: 'scenario', 'game_cover', 'scenario_image', 'scenario_video' ou 'rule_file'
         """
+        if file_path and (file_path.startswith("http://") or file_path.startswith("https://")):
+            return file_path
+
+        supabase_url = self._upload_to_supabase(file_path, file_type)
+        if supabase_url:
+            return supabase_url
+
         filename = Path(file_path).name
         if file_type == "game_cover":
             return f"/api/admin/games/covers/{filename}"
