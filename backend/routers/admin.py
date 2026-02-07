@@ -1304,7 +1304,11 @@ async def delete_facilitator_invitation(
     
     if not invitation:
         raise HTTPException(status_code=404, detail="Convite não encontrado")
-    
+
+    db.query(InvitationGame).filter(
+        InvitationGame.invitation_id == invitation_id
+    ).delete()
+
     db.delete(invitation)
     db.commit()
     return {"message": "Convite removido com sucesso"}
