@@ -184,7 +184,7 @@ export default function AdminLayout({
     <div className="min-h-screen bg-gray-100">
       <nav className="bg-white shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
+          <div className="flex flex-wrap items-center gap-2 py-3">
             <div className="flex items-center flex-1 min-w-0">
               <div className="flex-shrink-0 flex items-center">
                 <Gamepad2 className="h-8 w-8 text-blue-600" />
@@ -325,7 +325,7 @@ export default function AdminLayout({
                 </div>
               )}
             </div>
-            <div className="flex items-center flex-shrink-0 gap-2 sm:gap-4 ml-4 min-w-0">
+            <div className="flex items-center flex-shrink-0 gap-2 sm:gap-4 ml-auto min-w-0 w-full sm:w-auto justify-end">
               <div className="hidden lg:block h-6 w-px bg-gray-300"></div>
               <span className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap hidden sm:inline max-w-[140px] sm:max-w-[220px] truncate">
                 {finalUser?.username}
