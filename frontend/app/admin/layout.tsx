@@ -325,9 +325,9 @@ export default function AdminLayout({
                 </div>
               )}
             </div>
-            <div className="flex items-center flex-shrink-0 gap-2 sm:gap-4 ml-4">
+            <div className="flex items-center flex-shrink-0 gap-2 sm:gap-4 ml-4 min-w-0">
               <div className="hidden lg:block h-6 w-px bg-gray-300"></div>
-              <span className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap hidden sm:inline">
+              <span className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap hidden sm:inline max-w-[140px] sm:max-w-[220px] truncate">
                 {finalUser?.username}
               </span>
               <button
