@@ -137,6 +137,19 @@ export default function UsersPage() {
     }
   }
 
+  const handleDeleteInvitation = async (invitationId: number) => {
+    if (!confirm('Tem certeza que deseja remover este convite?')) return
+    try {
+      toast.loading('Removendo convite...', { id: 'delete-invitation' })
+      await api.delete(`/api/admin/players/invitations/${invitationId}`)
+      toast.success('Convite removido com sucesso!', { id: 'delete-invitation' })
+      fetchInvitations()
+    } catch (error: any) {
+      console.error('Erro ao remover convite:', error)
+      toast.error(error.response?.data?.detail || 'Erro ao remover convite', { id: 'delete-invitation' })
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingPlayer) return
@@ -363,9 +376,18 @@ export default function UsersPage() {
                       Criado em: {new Date(invitation.created_at).toLocaleString('pt-BR')}
                     </p>
                   </div>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                    Pendente
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                      Pendente
+                    </span>
+                    <button
+                      onClick={() => handleDeleteInvitation(invitation.id)}
+                      className="inline-flex items-center px-3 py-2 border border-transparent text-xs font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                      title="Remover convite"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </li>
             ))

@@ -6,8 +6,6 @@ import { useAuthStore } from '@/store/authStore'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { 
-  Mic, 
-  MicOff, 
   Send, 
   Save, 
   Loader2, 
@@ -92,8 +90,6 @@ function GamePageContent() {
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [playerInput, setPlayerInput] = useState('')
-  const [isRecording, setIsRecording] = useState(false)
-  const [includeAudio, setIncludeAudio] = useState(false)
   const [activeAudio, setActiveAudio] = useState<HTMLAudioElement | null>(null)
   
   // Estado para cenários (carregados automaticamente)
@@ -113,8 +109,6 @@ function GamePageContent() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
   const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
   // Verificação de autenticação
@@ -441,6 +435,26 @@ function GamePageContent() {
       }
       const ordered = history.reverse()
       setInteractions(ordered) // Ordenar do mais antigo para o mais recente
+
+      const list = scenariosOverride && scenariosOverride.length > 0 ? scenariosOverride : scenarios
+      const lastScene = [...ordered].reverse().find((item) => item.message_type === 'scene')
+      if (lastScene?.scene_image_url) {
+        setForcedSceneBackground(lastScene.scene_image_url)
+        return
+      }
+
+      const fallbackScenario =
+        list.find((s) => s.id === currentScenarioId) ||
+        getIntroStartScenario(list)
+
+      if (fallbackScenario?.id && !currentScenarioId) {
+        setCurrentScenarioId(fallbackScenario.id)
+      }
+
+      const fallbackImage = formatScenarioImageUrl(fallbackScenario?.image_url)
+      if (fallbackImage) {
+        setForcedSceneBackground(fallbackImage)
+      }
     } catch (error: any) {
       console.error('Erro ao carregar histórico:', error)
     }
@@ -876,7 +890,7 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
         session_id: session.id,
         player_input: inputText,
         player_input_type: 'text',
-        include_audio_response: includeAudio
+        include_audio_response: false
       })
 
       const newInteraction = response.data
@@ -902,43 +916,6 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
     }
   }
 
-  // Iniciar gravação de áudio
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
-        }
-      }
-
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        await sendAudio(audioBlob)
-        stream.getTracks().forEach(track => track.stop())
-      }
-
-      mediaRecorder.start()
-      setIsRecording(true)
-      toast.success('Gravando...')
-    } catch (error) {
-      console.error('Erro ao iniciar gravação:', error)
-      toast.error('Erro ao acessar microfone')
-    }
-  }
-
-  // Parar gravação
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-    }
-  }
-
   // Enviar áudio
   const sendAudio = async (audioBlob: Blob) => {
     if (!session || loading) return
@@ -950,7 +927,7 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
       const formData = new FormData()
       formData.append('audio_file', audioBlob, 'audio.webm')
       formData.append('session_id', session.id.toString())
-      formData.append('include_audio_response', includeAudio.toString())
+      formData.append('include_audio_response', 'false')
 
       const response = await api.post('/api/game/interact/audio', formData, {
         headers: {
@@ -1293,15 +1270,6 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
         {/* Área de Input */}
         <div className="bg-white/95 backdrop-blur-md rounded-lg shadow-xl p-4">
           <div className="flex items-center justify-between gap-2 mb-2">
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeAudio}
-                onChange={(e) => setIncludeAudio(e.target.checked)}
-                className="rounded"
-              />
-              Incluir áudio na resposta
-            </label>
             {finalUser?.role && (
               <button
                 onClick={handleBackToRooms}
@@ -1330,19 +1298,6 @@ Traz elementos na cena que provoquem eles serem criativos e utilizarem seus pode
               disabled={loading || !session}
             />
             
-            <button
-              onClick={isRecording ? stopRecording : startRecording}
-              disabled={loading || !session}
-              className={`p-3 rounded-lg transition-colors ${
-                isRecording
-                  ? 'bg-red-500 hover:bg-red-600 text-white'
-                  : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={isRecording ? 'Parar gravação' : 'Gravar áudio'}
-            >
-              {isRecording ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-            </button>
-
             <button
               onClick={handleSendMessage}
               disabled={loading || !playerInput.trim() || !session}

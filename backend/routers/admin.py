@@ -1140,6 +1140,29 @@ async def list_player_invitations(
     ).order_by(Invitation.created_at.desc()).offset(skip).limit(limit).all()
     return invitations
 
+@router.delete("/players/invitations/{invitation_id}")
+async def delete_player_invitation(
+    invitation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Remove um convite de jogador"""
+    invitation = db.query(Invitation).filter(
+        Invitation.id == invitation_id,
+        Invitation.role == UserRole.PLAYER
+    ).first()
+
+    if not invitation:
+        raise HTTPException(status_code=404, detail="Convite não encontrado")
+
+    db.query(InvitationGame).filter(
+        InvitationGame.invitation_id == invitation_id
+    ).delete()
+
+    db.delete(invitation)
+    db.commit()
+    return {"message": "Convite removido com sucesso"}
+
 @router.get("/players/{player_id}/games", response_model=List[PlayerGameAccessResponse])
 async def get_player_game_accesses(
     player_id: int,

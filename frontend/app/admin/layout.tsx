@@ -326,10 +326,10 @@ export default function AdminLayout({
               )}
             </div>
             <div className="flex items-center flex-shrink-0 gap-2 sm:gap-4 min-w-0 w-full justify-end self-end border-t border-gray-200 pt-2">
-              <div className="hidden lg:block h-6 w-px bg-gray-300"></div>
+             {/*  <div className="hidden lg:block h-6 w-px bg-gray-300"></div>
               <span className="text-xs sm:text-sm font-medium text-gray-700 whitespace-nowrap hidden sm:inline max-w-[220px] lg:max-w-[320px] truncate">
                 {finalUser?.username}
-              </span>
+              </span> */}
               <button
                 onClick={handleLogout}
                 className="inline-flex items-center px-2 sm:px-4 py-2 border border-transparent text-xs sm:text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
