@@ -17,6 +17,14 @@ interface Game {
   updated_at?: string
 }
 
+const resolveCoverUrl = (url?: string | null) => {
+  if (!url) return null
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url
+  }
+  return `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${url}`
+}
+
 export default function AdminGamesPage() {
   const router = useRouter()
   const { setGameId } = useSelectedGame()
@@ -143,7 +151,7 @@ export default function AdminGamesPage() {
               {game.cover_image_url ? (
                 <div className="h-48 bg-gray-200 relative">
                   <img
-                    src={`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}${game.cover_image_url}`}
+                    src={resolveCoverUrl(game.cover_image_url) || ''}
                     alt={game.title}
                     className="w-full h-full object-cover"
                     onError={(e) => {
@@ -242,7 +250,7 @@ function GameModal({
     description: game?.description || '',
   })
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
-  const [imagePreview, setImagePreview] = useState<string | null>(game?.cover_image_url || null)
+  const [imagePreview, setImagePreview] = useState<string | null>(resolveCoverUrl(game?.cover_image_url) || null)
 
   useEffect(() => {
     if (game) {
@@ -250,7 +258,7 @@ function GameModal({
         title: game.title || '',
         description: game.description || '',
       })
-      setImagePreview(game.cover_image_url || null)
+      setImagePreview(resolveCoverUrl(game.cover_image_url) || null)
     } else {
       setFormData({
         title: '',
@@ -392,7 +400,7 @@ function GameModal({
                     type="button"
                     onClick={() => {
                       setSelectedImage(null)
-                      setImagePreview(game?.cover_image_url || null)
+                      setImagePreview(resolveCoverUrl(game?.cover_image_url) || null)
                     }}
                     className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1 hover:bg-red-700"
                   >

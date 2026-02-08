@@ -1,6 +1,8 @@
 import os
 import io
 import mimetypes
+import re
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +53,14 @@ class FileService:
             await f.write(file_data)
         return str(file_path)
 
+    def _sanitize_filename(self, filename: str) -> str:
+        name = unicodedata.normalize("NFKD", filename)
+        name = "".join(ch for ch in name if not unicodedata.combining(ch))
+        name = name.replace(" ", "-")
+        name = re.sub(r"[^A-Za-z0-9._-]+", "-", name)
+        name = re.sub(r"-{2,}", "-", name).strip("-")
+        return name or "file"
+
     def _get_storage_path(self, file_type: str, filename: str) -> str:
         folder_map = {
             "game_cover": "game_covers",
@@ -60,7 +70,8 @@ class FileService:
             "scenario": "scenario_files",
         }
         folder = folder_map.get(file_type, "scenario_files")
-        return f"{folder}/{filename}"
+        safe_name = self._sanitize_filename(filename)
+        return f"{folder}/{safe_name}"
 
     def _upload_to_supabase(self, file_path: str, file_type: str) -> Optional[str]:
         if not self.supabase_client or not self.supabase_bucket:
@@ -77,7 +88,7 @@ class FileService:
                 f,
                 file_options={
                     "content-type": content_type or "application/octet-stream",
-                    "upsert": True,
+                    "upsert": "true",
                 },
             )
         return self.supabase_client.storage.from_(self.supabase_bucket).get_public_url(storage_path)
