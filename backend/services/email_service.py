@@ -1,6 +1,7 @@
 import os
 import secrets
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -42,6 +43,51 @@ class EmailService:
             print(f"[EMAIL SERVICE] Subject: {subject}")
             print(f"[EMAIL SERVICE] Message: {text_body}")
             print(f"[EMAIL SERVICE] Configure SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD no .env")
+            return False
+
+    @staticmethod
+    def _send_resend_email(
+        to_email: str,
+        subject: str,
+        html_body: str,
+        text_body: str
+    ) -> bool:
+        """Envia e-mail via Resend API"""
+        resend_api_key = os.getenv("RESEND_API_KEY", "")
+        from_email = os.getenv("EMAIL_FROM", "")
+
+        if not resend_api_key or not from_email:
+            print("[EMAIL SERVICE] Resend não configurado. E-mail não enviado.")
+            print(f"[EMAIL SERVICE] Para: {to_email}")
+            print(f"[EMAIL SERVICE] Subject: {subject}")
+            print(f"[EMAIL SERVICE] Configure RESEND_API_KEY e EMAIL_FROM no .env")
+            return False
+
+        try:
+            response = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": from_email,
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": html_body,
+                    "text": text_body,
+                },
+                timeout=15,
+            )
+
+            if response.status_code >= 400:
+                print(f"[EMAIL SERVICE] Erro Resend ({response.status_code}): {response.text}")
+                return False
+
+            print(f"[EMAIL SERVICE] E-mail enviado via Resend para {to_email}")
+            return True
+        except Exception as e:
+            print(f"[EMAIL SERVICE] Erro ao enviar via Resend: {str(e)}")
             return False
         
         try:
@@ -144,6 +190,10 @@ Equipe da Plataforma de Jogo Online"""
 </body>
 </html>"""
         
-        # Tentar enviar via SMTP
+        provider = os.getenv("EMAIL_PROVIDER", "").lower()
+        if provider == "resend" or os.getenv("RESEND_API_KEY"):
+            return EmailService._send_resend_email(email, subject, html_body, text_body)
+
+        # Fallback para SMTP
         return EmailService._send_smtp_email(email, subject, html_body, text_body)
 
